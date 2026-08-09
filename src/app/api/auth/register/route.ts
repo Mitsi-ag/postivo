@@ -39,6 +39,6 @@ export async function POST(req: NextRequest) {
   ]);
   const user = await one<User>('SELECT * FROM users WHERE id = $1', [id]);
   const res = NextResponse.json({ user: publicUser(user as User) });
-  attachSession(res, id);
+  attachSession(res, id, req);
   return res;
 }

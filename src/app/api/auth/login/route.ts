@@ -21,6 +21,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
   }
   const res = NextResponse.json({ user: publicUser(user) });
-  attachSession(res, user.id);
+  attachSession(res, user.id, req);
   return res;
 }

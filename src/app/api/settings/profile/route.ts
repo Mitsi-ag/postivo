@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, publicUser, unauthorized } from '@/lib/auth';
 import { one, query, type User } from '@/lib/db';
+import { assertPublicUrl } from '@/lib/ssrf';
 
 interface ProfileBody {
   name?: string;
@@ -25,6 +26,13 @@ export async function POST(req: NextRequest) {
     webhookUrl = webhookUrl.trim() || null;
     if (webhookUrl && !/^https?:\/\//.test(webhookUrl)) {
       return NextResponse.json({ error: 'outbound_webhook_url must be an http(s) URL' }, { status: 400 });
+    }
+    if (webhookUrl) {
+      try {
+        await assertPublicUrl(webhookUrl);
+      } catch (err) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : 'Webhook URL is not allowed' }, { status: 400 });
+      }
     }
   }
   await query(

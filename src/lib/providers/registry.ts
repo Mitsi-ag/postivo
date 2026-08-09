@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Channel } from '../db';
+import { assertPublicUrl } from '../ssrf';
 import type { ProviderField, ProviderMeta } from '../types';
 
 export interface PublishContext {
@@ -108,6 +109,7 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content, mediaUrls, ctx) {
       if (!creds.url) throw new Error('Webhook URL is missing');
+      await assertPublicUrl(creds.url); // SSRF guard
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (creds.secret) headers['x-postivo-secret'] = creds.secret;
       const res = await fetch(creds.url, {

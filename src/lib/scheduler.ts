@@ -5,6 +5,7 @@ import { generateCaption } from './ai';
 import { createPost } from './core';
 import { postsThisMonth, planOf } from './plans';
 import { newItems, parseFeed } from './rss';
+import { assertPublicUrl, guardedFetch } from './ssrf';
 
 const STARTED = Symbol.for('postivo.scheduler.started');
 const MAX_ATTEMPTS = 3;
@@ -46,12 +47,16 @@ async function log(targetId: string, level: string, message: string): Promise<vo
 // Fire-and-forget outbound webhook (5s timeout, errors swallowed).
 function fireOutbound(url: string | null, payload: Record<string, unknown>): void {
   if (!url) return;
-  fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => {});
+  assertPublicUrl(url)
+    .then(() =>
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5_000),
+      }),
+    )
+    .catch(() => {});
 }
 
 // Atomically claim due targets. FOR UPDATE ... SKIP LOCKED makes this safe to
@@ -345,7 +350,7 @@ async function pollRssFeeds(): Promise<void> {
 async function processFeed(feed: RssFeed): Promise<void> {
   const user = await one<User>('SELECT * FROM users WHERE id = $1', [feed.user_id]);
   if (!user) return;
-  const res = await fetch(feed.url, { signal: AbortSignal.timeout(15_000) });
+  const res = await guardedFetch(feed.url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`feed responded ${res.status}`);
   const xml = await res.text();
   const items = parseFeed(xml);

@@ -74,17 +74,32 @@ export function verifySessionToken(token: string): string | null {
   }
 }
 
-export function attachSession(res: NextResponse, uid: string): void {
+// Behind a TLS-terminating proxy (App Runner) the app sees plain http, so we
+// trust x-forwarded-proto to decide whether the Secure flag belongs on the
+// session cookie.
+function isSecureRequest(req?: NextRequest): boolean {
+  if (!req) return false;
+  return req.headers.get('x-forwarded-proto') === 'https' || req.nextUrl.protocol === 'https:';
+}
+
+export function attachSession(res: NextResponse, uid: string, req?: NextRequest): void {
   res.cookies.set(SESSION_COOKIE, createSessionToken(uid), {
     httpOnly: true,
     sameSite: 'lax',
+    secure: isSecureRequest(req),
     path: '/',
     maxAge: SESSION_TTL_MS / 1000,
   });
 }
 
-export function detachSession(res: NextResponse): void {
-  res.cookies.set(SESSION_COOKIE, '', { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 0 });
+export function detachSession(res: NextResponse, req?: NextRequest): void {
+  res.cookies.set(SESSION_COOKIE, '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isSecureRequest(req),
+    path: '/',
+    maxAge: 0,
+  });
 }
 
 // ---------- request auth ----------

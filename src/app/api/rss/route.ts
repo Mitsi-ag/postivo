@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { one, query, type Channel, type RssFeed } from '@/lib/db';
+import { assertPublicUrl } from '@/lib/ssrf';
 import type { RssFeedDTO } from '@/lib/types';
 
 function toDTO(f: RssFeed): RssFeedDTO {
@@ -38,6 +39,11 @@ export async function POST(req: NextRequest) {
   if (!body) return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   const url = (body.url ?? '').trim();
   if (!/^https?:\/\//.test(url)) return NextResponse.json({ error: 'url must be an http(s) URL' }, { status: 400 });
+  try {
+    await assertPublicUrl(url);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'URL is not allowed' }, { status: 400 });
+  }
   const channelIds: string[] = [];
   for (const cid of Array.isArray(body.channelIds) ? body.channelIds : []) {
     const ch = await one<Channel>('SELECT id FROM channels WHERE id = $1 AND user_id = $2', [String(cid), user.id]);

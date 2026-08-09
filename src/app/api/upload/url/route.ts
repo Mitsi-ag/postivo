@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { putMedia } from '@/lib/storage';
+import { guardedFetch } from '@/lib/ssrf';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   let res: Response;
   try {
-    res = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: 'follow' });
+    res = await guardedFetch(url, { signal: AbortSignal.timeout(10_000) });
   } catch (err) {
     return NextResponse.json({ error: `Could not fetch URL: ${err instanceof Error ? err.message : String(err)}` }, { status: 502 });
   }
