@@ -27,4 +27,6 @@ COPY --from=builder --chown=postivo:postivo /app/.next/static ./.next/static
 COPY --from=builder --chown=postivo:postivo /app/public ./public
 USER postivo
 EXPOSE 3000
-CMD ["node", "server.js"]
+# App Runner injects HOSTNAME=<instance-hostname> which makes Next bind to a
+# non-routable interface — force 0.0.0.0 at process start regardless.
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 exec node server.js"]
