@@ -7,7 +7,15 @@ export const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(process.cwd(), 'data');
 
-fs.mkdirSync(path.join(DATA_DIR, 'uploads'), { recursive: true });
+// Created lazily — on read-only/container filesystems (e.g. App Runner with S3
+// media) the dir may not be writable and must never crash boot.
+try {
+  fs.mkdirSync(path.join(DATA_DIR, 'uploads'), { recursive: true });
+} catch {
+  if (!process.env.S3_BUCKET) {
+    console.warn(`[postivo] WARN: cannot create ${DATA_DIR} and S3_BUCKET is unset — uploads/jwt persistence will fail`);
+  }
+}
 
 // Return timestamptz as clean ISO strings instead of Date objects.
 pg.types.setTypeParser(1184, (v: string) => new Date(v).toISOString());

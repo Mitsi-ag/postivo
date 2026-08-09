@@ -20,7 +20,8 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
-RUN addgroup -S postivo && adduser -S postivo -G postivo
+RUN addgroup -S postivo && adduser -S postivo -G postivo \
+    && mkdir -p /app/data && chown -R postivo:postivo /app/data
 COPY --from=builder --chown=postivo:postivo /app/.next/standalone ./
 COPY --from=builder --chown=postivo:postivo /app/.next/static ./.next/static
 COPY --from=builder --chown=postivo:postivo /app/public ./public
