@@ -24,11 +24,13 @@ export async function channelsUsed(userId: string): Promise<number> {
   return row?.c ?? 0;
 }
 
-// Scheduled posts created in the current calendar month.
+// Scheduled posts created in the current calendar month. Counts any post that
+// was given a schedule — including ones already published or failed — so the
+// monthly quota can't be bypassed by posts leaving the 'scheduled' status.
 export async function postsThisMonth(userId: string): Promise<number> {
   const row = await one<{ c: number }>(
     `SELECT COUNT(*)::int AS c FROM posts
-     WHERE user_id = $1 AND status = 'scheduled' AND created_at >= date_trunc('month', now())`,
+     WHERE user_id = $1 AND scheduled_at IS NOT NULL AND created_at >= date_trunc('month', now())`,
     [userId],
   );
   return row?.c ?? 0;
