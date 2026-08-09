@@ -3,7 +3,7 @@ import Link from 'next/link';
 const COMPARISON = [
   { label: 'Deployment', postiz: 'Next.js + NestJS + PostgreSQL + Redis + BullMQ + Temporal', postivo: 'One container. One process.' },
   { label: 'Memory', postiz: '2 GB+ across 5 services', postivo: '< 512 MB, everything in-process' },
-  { label: 'Database', postiz: 'External PostgreSQL required', postivo: 'Embedded SQLite (WAL), zero setup' },
+  { label: 'Database', postiz: 'External PostgreSQL + Redis required', postivo: 'One managed Postgres. Nothing else.' },
   { label: 'License', postiz: 'AGPL-3.0', postivo: 'MIT — do whatever you want' },
   { label: 'API', postiz: 'Internal-first, UI-driven', postivo: 'Agent-first REST API with Bearer keys' },
 ];
@@ -12,8 +12,8 @@ const FEATURES = [
   { icon: '🗓️', title: 'Schedule everywhere', desc: 'Compose once, publish to Bluesky, Mastodon, X, LinkedIn, DEV and any webhook — with per-channel overrides.' },
   { icon: '🪝', title: 'Webhook provider', desc: 'First-class webhook channel plugs straight into n8n, Zapier or Make. Your content, your pipelines.' },
   { icon: '🤖', title: 'Agent-first API', desc: 'Every core action is a clean REST endpoint. Generate an API key and let your agents schedule for you.' },
-  { icon: '📦', title: 'Self-host anywhere', desc: 'No Postgres, no Redis, no workers. A single Node process with an embedded SQLite database.' },
-  { icon: '🖼️', title: 'Media uploads', desc: 'Attach images and video up to 50 MB. Stored locally, served by the app.' },
+  { icon: '📦', title: 'Stateless & autoscaling', desc: 'No Redis, no worker fleet. A stateless Node tier on Postgres + S3 that scales 1→10 instances automatically.' },
+  { icon: '🖼️', title: 'Media uploads', desc: 'Attach images and video up to 50 MB. Stored in S3, served securely by the app.' },
   { icon: '✨', title: 'AI captions', desc: 'Optional OpenAI-compatible caption generation, with a built-in local fallback that works offline.' },
 ];
 
@@ -50,9 +50,9 @@ export default function Landing() {
           </span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-400">
-          Postivo is a social media scheduler that runs as a single Next.js app with an embedded SQLite
-          database and an in-process scheduler. No Postgres, no Redis, no worker fleet — just{' '}
-          <code className="rounded bg-slate-800 px-1.5 py-0.5 text-sm text-indigo-300">npm start</code>.
+          Postivo is a social media scheduler that runs as a single stateless Next.js app on Postgres
+          with an in-process, race-safe scheduler. No Redis, no Temporal, no worker fleet — one container
+          that autoscales with your traffic.
         </p>
         <div className="mt-8 flex items-center justify-center gap-4">
           <Link
