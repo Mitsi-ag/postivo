@@ -264,6 +264,17 @@ export async function updatePost(
   const media = body.media !== undefined ? body.media : Array.isArray(existing.media) ? existing.media : [];
   const scheduledAt = body.scheduled_at !== undefined ? body.scheduled_at : existing.scheduled_at;
 
+  const comments = body.comments !== undefined ? parseComments(body.comments) : null;
+  if (body.comments !== undefined && !comments) {
+    return { error: 'comments must be an array of {content, delayMin>=0}', status: 400 };
+  }
+  const tags = body.tags !== undefined ? parseTags(body.tags) : null;
+  if (body.tags !== undefined && !tags) return { error: 'tags must be an array of strings', status: 400 };
+  const repeat = body.repeat_every_days !== undefined ? parseRepeat(body.repeat_every_days) : undefined;
+  if (body.repeat_every_days !== undefined && repeat === undefined) {
+    return { error: 'repeat_every_days must be an integer between 1 and 365', status: 400 };
+  }
+
   let status = existing.status;
   if (body.status && ['draft', 'scheduled'].includes(body.status)) {
     status = body.status as Post['status'];
@@ -274,9 +285,21 @@ export async function updatePost(
   if (scheduledAt && Number.isNaN(Date.parse(scheduledAt))) return { error: 'Invalid scheduled_at datetime', status: 400 };
   if (!content && media.length === 0) return { error: 'Content is required', status: 400 };
 
+  // Unscheduling (draft) implicitly clears the repeat schedule.
+  const finalRepeat = !scheduledAt ? null : repeat !== undefined ? repeat : (existing.repeat_every_days ?? null);
+
   await query(
-    'UPDATE posts SET content = $1, media = $2, scheduled_at = $3, status = $4, updated_at = now() WHERE id = $5',
-    [content, JSON.stringify(media), scheduledAt, status, postId],
+    'UPDATE posts SET content = $1, media = $2, scheduled_at = $3, status = $4, comments = $5, repeat_every_days = $6, tags = $7, updated_at = now() WHERE id = $8',
+    [
+      content,
+      JSON.stringify(media),
+      scheduledAt,
+      status,
+      JSON.stringify(comments ?? (Array.isArray(existing.comments) ? existing.comments : [])),
+      finalRepeat,
+      JSON.stringify(tags ?? (Array.isArray(existing.tags) ? existing.tags : [])),
+      postId,
+    ],
   );
 
   if (body.channelIds) {
