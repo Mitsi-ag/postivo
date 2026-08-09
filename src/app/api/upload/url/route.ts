@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { putMedia } from '@/lib/storage';
-import { guardedFetch } from '@/lib/ssrf';
+import { BodyTooLargeError, guardedFetch, readBodyCapped } from '@/lib/ssrf';
+import { rateLimit } from '@/lib/ratelimit';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -23,6 +24,9 @@ const EXT_BY_MIME: Record<string, string> = {
 export async function POST(req: NextRequest) {
   const user = await getSessionUser(req);
   if (!user) return unauthorized();
+  if (!rateLimit(`upload-url:${user.id}`, 20, 60 * 60_000)) {
+    return NextResponse.json({ error: 'URL import limit reached — try again later' }, { status: 429 });
+  }
   const body = (await req.json().catch(() => null)) as { url?: string } | null;
   const url = (body?.url ?? '').trim();
   if (!/^https?:\/\//.test(url)) {
@@ -41,11 +45,17 @@ export async function POST(req: NextRequest) {
   if (!/^(image|video)\//.test(mime)) {
     return NextResponse.json({ error: `URL is not an image or video (content-type: ${mime || 'unknown'})` }, { status: 415 });
   }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.byteLength === 0) return NextResponse.json({ error: 'URL returned an empty body' }, { status: 400 });
-  if (buffer.byteLength > MAX_BYTES) {
-    return NextResponse.json({ error: 'Remote file exceeds the 50MB limit' }, { status: 413 });
+  let buffer: Buffer;
+  try {
+    // Streamed with a hard byte cap — aborts instead of buffering a giant body.
+    buffer = await readBodyCapped(res, MAX_BYTES);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      return NextResponse.json({ error: 'Remote file exceeds the 50MB limit' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'Could not download the remote file' }, { status: 502 });
   }
+  if (buffer.byteLength === 0) return NextResponse.json({ error: 'URL returned an empty body' }, { status: 400 });
 
   const urlName = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '').replace(/[^\w.-]/g, '').slice(0, 300);
   const ext = EXT_BY_MIME[mime] ?? (mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/g, '');

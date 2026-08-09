@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { putMedia } from '@/lib/storage';
+import { rateLimit } from '@/lib/ratelimit';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -21,6 +22,9 @@ const EXT_BY_MIME: Record<string, string> = {
 export async function POST(req: NextRequest) {
   const user = await getSessionUser(req);
   if (!user) return unauthorized();
+  if (!rateLimit(`upload:${user.id}`, 30, 60 * 60_000)) {
+    return NextResponse.json({ error: 'Upload limit reached — try again later' }, { status: 429 });
+  }
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');

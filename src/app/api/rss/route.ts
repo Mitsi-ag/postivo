@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { one, query, type Channel, type RssFeed } from '@/lib/db';
+import { planOf } from '@/lib/plans';
 import { assertPublicUrl } from '@/lib/ssrf';
 import type { RssFeedDTO } from '@/lib/types';
 
@@ -50,11 +51,26 @@ export async function POST(req: NextRequest) {
     if (ch) channelIds.push(ch.id);
   }
   if (channelIds.length === 0) return NextResponse.json({ error: 'Select at least one valid channel' }, { status: 400 });
+  const plan = planOf(user);
+  const aiCaption = body.ai_caption === true;
+  if (aiCaption && !plan.aiCaptions) {
+    return NextResponse.json(
+      { error: 'AI captions are a Pro feature — upgrade to use them.', upgrade: true },
+      { status: 402 },
+    );
+  }
+  const feedCount = (await one<{ c: number }>('SELECT COUNT(*)::int AS c FROM rss_feeds WHERE user_id = $1', [user.id]))?.c ?? 0;
+  if (feedCount >= plan.rssFeeds) {
+    return NextResponse.json(
+      { error: `Your plan allows ${plan.rssFeeds} RSS feed${plan.rssFeeds === 1 ? '' : 's'} — upgrade to add more.`, upgrade: true },
+      { status: 402 },
+    );
+  }
   const intervalMin = Math.min(Math.max(Math.floor(Number(body.interval_min) || 60), 5), 24 * 60);
   const id = crypto.randomUUID();
   await query(
     'INSERT INTO rss_feeds (id, user_id, url, channel_ids, interval_min, ai_caption) VALUES ($1,$2,$3,$4,$5,$6)',
-    [id, user.id, url, JSON.stringify(channelIds), intervalMin, body.ai_caption === true],
+    [id, user.id, url, JSON.stringify(channelIds), intervalMin, aiCaption],
   );
   const feed = await one<RssFeed>('SELECT * FROM rss_feeds WHERE id = $1', [id]);
   return NextResponse.json({ feed: toDTO(feed as RssFeed) }, { status: 201 });

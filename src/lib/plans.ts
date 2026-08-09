@@ -6,13 +6,14 @@ export interface PlanLimits {
   channels: number;
   postsPerMonth: number;
   aiCaptions: boolean;
+  rssFeeds: number;
   label: string;
   price: string;
 }
 
 export const PLANS: Record<PlanId, PlanLimits> = {
-  free: { channels: 3, postsPerMonth: 30, aiCaptions: false, label: 'Free', price: '$0' },
-  pro: { channels: 100, postsPerMonth: 10_000, aiCaptions: true, label: 'Pro', price: '$9/mo' },
+  free: { channels: 3, postsPerMonth: 30, aiCaptions: false, rssFeeds: 3, label: 'Free', price: '$0' },
+  pro: { channels: 100, postsPerMonth: 10_000, aiCaptions: true, rssFeeds: 50, label: 'Pro', price: '$9/mo' },
 };
 
 export function planOf(user: Pick<User, 'plan'>): PlanLimits {

@@ -4,9 +4,9 @@ import { getProvider } from './providers/registry';
 import { decryptChannelCredentials } from './crypto';
 import { generateCaption } from './ai';
 import { createPost } from './core';
-import { postsThisMonth, planOf } from './plans';
+import { channelsUsed, postsThisMonth, planOf } from './plans';
 import { newItems, parseFeed } from './rss';
-import { guardedFetch } from './ssrf';
+import { guardedFetch, readBodyCapped } from './ssrf';
 
 const STARTED = Symbol.for('postivo.scheduler.started');
 const MAX_ATTEMPTS = 3;
@@ -14,6 +14,27 @@ const BATCH_SIZE = 10;
 // Watchdog: a claimed ('publishing') target becomes claimable again after this
 // long, so a crashed instance can never strand a post.
 const CLAIM_TIMEOUT_MINUTES = 5;
+// Hard cap on any single provider publish — a hung provider must not hold a
+// claim hostage until the watchdog re-claims it (duplicate-publish window).
+const PUBLISH_TIMEOUT_MS = 30_000;
+// RSS bodies are capped so a hostile feed can't OOM the instance.
+const RSS_MAX_BYTES = 5 * 1024 * 1024;
+
+// Per-instance tick mutex: a slow tick (many due targets) must never stack
+// with the next interval fire.
+let tickRunning = false;
+
+class PlanLimitError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  // race() subscribes to `promise`, so a late rejection after the timeout
+  // wins is handled (ignored) rather than crashing the process.
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 export function startScheduler(): void {
   const g = globalThis as unknown as Record<symbol, boolean>;
@@ -21,7 +42,13 @@ export function startScheduler(): void {
   g[STARTED] = true;
   console.log('[postivo] in-process scheduler started (30s interval)');
   const timer = setInterval(() => {
-    tick().catch((err) => console.error('[postivo] scheduler tick failed:', err));
+    if (tickRunning) return; // previous tick still working — skip this fire
+    tickRunning = true;
+    tick()
+      .catch((err) => console.error('[postivo] scheduler tick failed:', err))
+      .finally(() => {
+        tickRunning = false;
+      });
   }, 30_000);
   // Never keep a process (e.g. a build worker) alive because of the scheduler.
   if (typeof timer.unref === 'function') timer.unref();
@@ -39,6 +66,8 @@ interface DueRow extends PostTarget {
   signature: string;
   signature_enabled: boolean;
   outbound_webhook_url: string | null;
+  user_id: string;
+  plan: string;
 }
 
 async function log(targetId: string, level: string, message: string): Promise<void> {
@@ -81,7 +110,8 @@ async function claimDue(): Promise<DueRow[]> {
        RETURNING pt.*
      )
      SELECT c.*, p.content AS content, p.media AS media, p.comments AS comments, p.scheduled_at AS scheduled_at,
-            u.signature AS signature, u.signature_enabled AS signature_enabled, u.outbound_webhook_url AS outbound_webhook_url
+            u.signature AS signature, u.signature_enabled AS signature_enabled, u.outbound_webhook_url AS outbound_webhook_url,
+            p.user_id AS user_id, u.plan AS plan
      FROM claimed c
      JOIN posts p ON p.id = c.post_id
      JOIN users u ON u.id = p.user_id`,
@@ -131,12 +161,25 @@ async function processTarget(row: DueRow): Promise<void> {
     const provider = getProvider(channel.provider);
     if (!provider) throw new Error(`Unknown provider "${channel.provider}"`);
     if (channel.status !== 'active') throw new Error(`Channel "${channel.name}" is not active (${channel.status})`);
+    // Enforce plan limits at publish time: a downgraded user who is over the
+    // channel limit fails fast (retryable via the UI after upgrading).
+    const plan = planOf({ plan: row.plan });
+    const used = await channelsUsed(row.user_id);
+    if (used > plan.channels) {
+      throw new PlanLimitError(
+        `plan_limit_exceeded: your plan allows ${plan.channels} channel${plan.channels === 1 ? '' : 's'} but ${used} are connected — upgrade to publish`,
+      );
+    }
     const content = withSignature(row.content_override ?? row.content, provider.maxLength, row.signature, row.signature_enabled);
     const creds = decryptChannelCredentials(channel);
-    const result = await provider.publish(channel, creds, content, mediaUrls, {
-      postId: row.post_id,
-      scheduledAt: row.scheduled_at,
-    });
+    const result = await withTimeout(
+      provider.publish(channel, creds, content, mediaUrls, {
+        postId: row.post_id,
+        scheduledAt: row.scheduled_at,
+      }),
+      PUBLISH_TIMEOUT_MS,
+      `Publishing to ${provider.id} timed out`,
+    );
     await query(
       `UPDATE post_targets SET status = 'published', published_at = now(), error = NULL, external_url = $1, external_id = $2 WHERE id = $3`,
       [result.externalUrl ?? null, result.externalId ?? null, row.id],
@@ -151,7 +194,9 @@ async function processTarget(row: DueRow): Promise<void> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const attempts = row.retry_count + 1;
+    // Plan-limit failures skip the retry ladder: they fail permanently right
+    // away and only make sense to retry after the user upgrades.
+    const attempts = err instanceof PlanLimitError ? MAX_ATTEMPTS : row.retry_count + 1;
     if (attempts >= MAX_ATTEMPTS) {
       await query(`UPDATE post_targets SET status = 'failed', error = $1, retry_count = $2 WHERE id = $3`, [
         message,
@@ -285,13 +330,21 @@ async function processComment(row: DueComment): Promise<void> {
     const creds = decryptChannelCredentials(channel);
     let result;
     if (provider.reply && row.external_id_target) {
-      result = await provider.reply({ ...channel, credentials: creds }, row.external_id_target, content);
+      result = await withTimeout(
+        provider.reply({ ...channel, credentials: creds }, row.external_id_target, content),
+        PUBLISH_TIMEOUT_MS,
+        `Reply on ${provider.id} timed out`,
+      );
     } else {
       // Provider can't thread replies — post as a standalone message instead.
-      result = await provider.publish(channel, creds, content, [], {
-        postId: row.post_id,
-        scheduledAt: row.publish_at,
-      });
+      result = await withTimeout(
+        provider.publish(channel, creds, content, [], {
+          postId: row.post_id,
+          scheduledAt: row.publish_at,
+        }),
+        PUBLISH_TIMEOUT_MS,
+        `Publishing to ${provider.id} timed out`,
+      );
     }
     await query(
       `UPDATE post_targets_comments SET status = 'published', published_at = now(), error = NULL, external_id = $1 WHERE id = $2`,
@@ -367,7 +420,8 @@ async function processFeed(feed: RssFeed): Promise<void> {
   if (!user) return;
   const res = await guardedFetch(feed.url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`feed responded ${res.status}`);
-  const xml = await res.text();
+  // Hard 5MB cap — content-length checked first, then the stream is aborted.
+  const xml = (await readBodyCapped(res, RSS_MAX_BYTES)).toString('utf8');
   const items = parseFeed(xml);
   if (items.length === 0) {
     console.error(`[postivo] rss feed ${feed.id} (${feed.url}): fetched OK but parsed 0 items (malformed or empty feed?)`);
@@ -377,7 +431,9 @@ async function processFeed(feed: RssFeed): Promise<void> {
 
   for (const item of fresh) {
     let content = `${item.title}\n\n${item.link}`.trim();
-    if (feed.ai_caption) content = await generateCaption(content);
+    // ai_caption is a Pro feature — enforce at poll time too (a downgraded
+    // user's feeds silently fall back to the raw item text).
+    if (feed.ai_caption && planOf(user).aiCaptions) content = await generateCaption(content);
     const result = await createPost(user, {
       content,
       scheduled_at: new Date().toISOString(),

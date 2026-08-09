@@ -90,3 +90,34 @@ export async function guardedFetch(rawUrl: string, init: RequestInit = {}, maxRe
     return res;
   }
 }
+
+export class BodyTooLargeError extends Error {}
+
+// Read a response body with a hard byte cap: checks content-length first,
+// then streams and aborts the moment the cap is exceeded — a malicious or
+// broken server can never buffer gigabytes into process memory.
+export async function readBodyCapped(res: Response, maxBytes: number): Promise<Buffer> {
+  const limitMb = Math.round(maxBytes / 1024 / 1024);
+  const declared = Number(res.headers.get('content-length') ?? 0);
+  if (declared > maxBytes) throw new BodyTooLargeError(`Response exceeds the ${limitMb}MB limit`);
+  if (!res.body) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength > maxBytes) throw new BodyTooLargeError(`Response exceeds the ${limitMb}MB limit`);
+    return buf;
+  }
+  const reader = res.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new BodyTooLargeError(`Response exceeds the ${limitMb}MB limit`);
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    if (total > maxBytes) await reader.cancel().catch(() => {});
+  }
+  return Buffer.concat(chunks);
+}
