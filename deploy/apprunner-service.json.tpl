@@ -32,8 +32,7 @@
   },
   "AutoScalingConfigurationArn": "${AUTOSCALING_ARN}",
   "HealthCheckConfiguration": {
-    "Protocol": "HTTP",
-    "Path": "/api/health",
+    "Protocol": "TCP",
     "Interval": 10,
     "Timeout": 5,
     "HealthyThreshold": 1,
