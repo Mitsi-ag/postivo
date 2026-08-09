@@ -29,7 +29,13 @@ export function rateLimit(key: string, limit: number, windowMs: number): boolean
 }
 
 export function clientIp(req: Request): string {
+  // Behind App Runner (or any proxy that appends), the LAST X-Forwarded-For
+  // entry is the client IP the platform saw — the leftmost values are
+  // attacker-controlled and must not be trusted for rate limiting.
   const fwd = req.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0].trim();
+  if (fwd) {
+    const parts = fwd.split(',');
+    return parts[parts.length - 1].trim();
+  }
   return req.headers.get('x-real-ip') ?? 'unknown';
 }

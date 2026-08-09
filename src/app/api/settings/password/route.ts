@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser, hashPassword, unauthorized, verifyPassword } from '@/lib/auth';
+import { attachSession, getSessionUser, hashPassword, revokeAllSessions, unauthorized, verifyPassword } from '@/lib/auth';
 import { query } from '@/lib/db';
 
 interface PasswordBody {
@@ -21,5 +21,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 });
   }
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(body.next), user.id]);
-  return NextResponse.json({ ok: true });
+  // A password change kills every existing session (stolen cookies included),
+  // then issues a fresh one so the changer stays logged in.
+  await revokeAllSessions(user.id);
+  const res = NextResponse.json({ ok: true });
+  await attachSession(res, user.id, req);
+  return res;
 }

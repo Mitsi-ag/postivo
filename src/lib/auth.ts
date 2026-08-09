@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
-import { DATA_DIR, one, query, type ApiKey, type User } from './db';
+import { DATA_DIR, one, query, type ApiKey, type Session, type User } from './db';
+import { clientIp, rateLimit } from './ratelimit';
 import type { PublicUser } from './types';
 
 export type { PublicUser };
@@ -30,7 +31,7 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 let cachedSecret: string | null = null;
 
-function getSecret(): string {
+export function getSecret(): string {
   if (cachedSecret) return cachedSecret;
   if (process.env.JWT_SECRET) {
     cachedSecret = process.env.JWT_SECRET;
@@ -50,13 +51,13 @@ function getSecret(): string {
   return cachedSecret;
 }
 
-export function createSessionToken(uid: string): string {
-  const body = Buffer.from(JSON.stringify({ uid, exp: Date.now() + SESSION_TTL_MS })).toString('base64url');
+export function createSessionToken(uid: string, jti: string): string {
+  const body = Buffer.from(JSON.stringify({ uid, jti, exp: Date.now() + SESSION_TTL_MS })).toString('base64url');
   const sig = crypto.createHmac('sha256', getSecret()).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
-export function verifySessionToken(token: string): string | null {
+export function verifySessionToken(token: string): { uid: string; jti: string } | null {
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
   const body = token.slice(0, dot);
@@ -66,12 +67,47 @@ export function verifySessionToken(token: string): string | null {
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { uid?: string; exp?: number };
-    if (!payload.uid || typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
-    return payload.uid;
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
+      uid?: string;
+      jti?: string;
+      exp?: number;
+    };
+    if (!payload.uid || !payload.jti || typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
+    return { uid: payload.uid, jti: payload.jti };
   } catch {
     return null;
   }
+}
+
+// ---------- server-side sessions (revocable) ----------
+
+// Every session token carries a jti backed by a row in the sessions table.
+// A token is only honored while its row exists, is unrevoked and unexpired —
+// so logout / password change / account deletion actually kill sessions.
+
+async function createSession(uid: string): Promise<string> {
+  const jti = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  await query('INSERT INTO sessions (jti, user_id, expires_at) VALUES ($1,$2,$3)', [jti, uid, expiresAt]);
+  // Opportunistic cleanup of expired rows (~2% of logins) so the table
+  // doesn't grow unbounded.
+  if (Math.random() < 0.02) {
+    await query('DELETE FROM sessions WHERE expires_at <= now()', []).catch(() => []);
+  }
+  return createSessionToken(uid, jti);
+}
+
+export async function revokeSession(jti: string): Promise<void> {
+  await query('UPDATE sessions SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NULL', [jti]);
+}
+
+export async function revokeAllSessions(uid: string): Promise<void> {
+  await query('UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [uid]);
+}
+
+async function activeSession(jti: string, uid: string): Promise<boolean> {
+  const row = await one<Session>('SELECT * FROM sessions WHERE jti = $1 AND user_id = $2', [jti, uid]);
+  return !!row && !row.revoked_at && new Date(row.expires_at).getTime() > Date.now();
 }
 
 // Behind a TLS-terminating proxy (App Runner) the app sees plain http, so we
@@ -82,8 +118,8 @@ function isSecureRequest(req?: NextRequest): boolean {
   return req.headers.get('x-forwarded-proto') === 'https' || req.nextUrl.protocol === 'https:';
 }
 
-export function attachSession(res: NextResponse, uid: string, req?: NextRequest): void {
-  res.cookies.set(SESSION_COOKIE, createSessionToken(uid), {
+export async function attachSession(res: NextResponse, uid: string, req?: NextRequest): Promise<void> {
+  res.cookies.set(SESSION_COOKIE, await createSession(uid), {
     httpOnly: true,
     sameSite: 'lax',
     secure: isSecureRequest(req),
@@ -121,9 +157,26 @@ export function publicUser(u: User): PublicUser {
 export async function getSessionUser(req: NextRequest): Promise<User | null> {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const uid = verifySessionToken(token);
-  if (!uid) return null;
-  return (await one<User>('SELECT * FROM users WHERE id = $1', [uid])) ?? null;
+  const claims = verifySessionToken(token);
+  if (!claims) return null;
+  if (!(await activeSession(claims.jti, claims.uid))) return null;
+  return (await one<User>('SELECT * FROM users WHERE id = $1', [claims.uid])) ?? null;
+}
+
+// Public v1 API auth: 120 req/min per key; 30 req/min for invalid Bearer
+// tokens (keyed by the presented key prefix + IP) so brute-force is throttled.
+export async function authV1(req: NextRequest): Promise<User | NextResponse> {
+  const header = req.headers.get('authorization') || '';
+  const match = header.match(/^Bearer\s+(pv_[a-f0-9]{48})$/i);
+  const presented = header.match(/^Bearer\s+(\S+)/)?.[1] ?? '';
+  const prefix = presented.slice(0, 14) || 'none';
+  if (!rateLimit(`v1:${prefix}`, 120, 60_000)) return tooManyRequests();
+  const user = match ? await authByApiKey(req) : null;
+  if (!user) {
+    if (!rateLimit(`v1-invalid:${prefix}:${clientIp(req)}`, 30, 60_000)) return tooManyRequests();
+    return unauthorized();
+  }
+  return user;
 }
 
 export async function authByApiKey(req: NextRequest): Promise<User | null> {
@@ -139,4 +192,8 @@ export async function authByApiKey(req: NextRequest): Promise<User | null> {
 
 export function unauthorized(): NextResponse {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+}
+
+export function tooManyRequests(): NextResponse {
+  return NextResponse.json({ error: 'Too many requests — slow down' }, { status: 429 });
 }

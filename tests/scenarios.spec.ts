@@ -286,18 +286,23 @@ test('session: expired or tampered cookie → 401; valid signed cookie → 200',
   const me = await ctx.get('/api/auth/me');
   const uid = ((await me.json()) as { user: { id: string } }).user.id;
 
-  const craft = (exp: number): string => {
-    const body = Buffer.from(JSON.stringify({ uid, exp })).toString('base64url');
+  const craft = (exp: number, jti: string): string => {
+    const body = Buffer.from(JSON.stringify({ uid, jti, exp })).toString('base64url');
     const sig = crypto.createHmac('sha256', secret!).update(body).digest('base64url');
     return `${body}.${sig}`;
   };
-  const expired = craft(Date.now() - 1000);
-  const valid = craft(Date.now() + 86_400_000);
+  // A valid token needs a live server-side session row backing its jti.
+  const jti = crypto.randomUUID();
+  await dbQuery('INSERT INTO sessions (jti, user_id, expires_at) VALUES ($1,$2, now() + interval '1 day')', [jti, uid]);
+  const expired = craft(Date.now() - 1000, crypto.randomUUID());
+  const noRow = craft(Date.now() + 86_400_000, crypto.randomUUID()); // valid HMAC, no session row
+  const valid = craft(Date.now() + 86_400_000, jti);
   const tampered = `${valid.slice(0, -1)}${valid.endsWith('A') ? 'B' : 'A'}`;
 
   for (const [name, token, expected] of [
     ['expired', expired, 401],
     ['tampered', tampered, 401],
+    ['no-session-row', noRow, 401],
     ['valid', valid, 200],
   ] as const) {
     for (const path of ['/api/auth/me', '/api/posts', '/api/rss', '/api/sets', '/api/media-list']) {

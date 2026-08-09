@@ -46,6 +46,14 @@ export interface ApiKey {
   last_used_at: string | null;
 }
 
+export interface Session {
+  jti: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+}
+
 export interface Channel {
   id: string;
   user_id: string;
@@ -168,6 +176,13 @@ const SCHEMA = `
     created_at timestamptz NOT NULL DEFAULT now(),
     last_used_at timestamptz
   );
+  CREATE TABLE IF NOT EXISTS sessions (
+    jti TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz
+  );
   CREATE TABLE IF NOT EXISTS channels (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -257,6 +272,8 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_comments_due ON post_targets_comments(status, publish_at);
   CREATE INDEX IF NOT EXISTS idx_comments_target ON post_targets_comments(target_id);
   CREATE INDEX IF NOT EXISTS idx_rss_user ON rss_feeds(user_id);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_sets_user ON sets(user_id);
   CREATE INDEX IF NOT EXISTS idx_posts_user ON posts(user_id);
   CREATE INDEX IF NOT EXISTS idx_targets_post ON post_targets(post_id);
@@ -271,7 +288,8 @@ export function getPool(): pg.Pool {
   if (!g.__postivoPool) {
     g.__postivoPool = new pg.Pool({
       connectionString: process.env.DATABASE_URL ?? 'postgres://postivo:postivo@localhost:5432/postivo',
-      max: Number(process.env.DATABASE_POOL_SIZE ?? 10),
+      // 10 App Runner instances × 5 connections = 50 < RDS max_connections.
+      max: Number(process.env.DATABASE_POOL_SIZE ?? 5),
       ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
     });
   }

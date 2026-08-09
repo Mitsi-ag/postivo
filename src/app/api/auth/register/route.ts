@@ -27,7 +27,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
   }
   if (await one<User>('SELECT * FROM users WHERE email = $1', [email])) {
-    return NextResponse.json({ error: 'Email is already registered' }, { status: 409 });
+    // Deliberately generic — don't confirm that the email is registered.
+    return NextResponse.json({ error: 'Could not create account' }, { status: 409 });
   }
   const id = crypto.randomUUID();
   await query('INSERT INTO users (id, email, password_hash, name, timezone) VALUES ($1,$2,$3,$4,$5)', [
@@ -39,6 +40,6 @@ export async function POST(req: NextRequest) {
   ]);
   const user = await one<User>('SELECT * FROM users WHERE id = $1', [id]);
   const res = NextResponse.json({ user: publicUser(user as User) });
-  attachSession(res, id, req);
+  await attachSession(res, id, req);
   return res;
 }

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authByApiKey, unauthorized } from '@/lib/auth';
+import { authV1 } from '@/lib/auth';
 import { createPost, listPosts, type PostInput } from '@/lib/core';
 
 // Public agent API — authenticate with `Authorization: Bearer pv_...`
 // (create keys under Settings → API keys).
 
 export async function GET(req: NextRequest) {
-  const user = await authByApiKey(req);
-  if (!user) return unauthorized();
+  const auth = await authV1(req);
+  if (auth instanceof NextResponse) return auth;
+  const user = auth;
   const sp = req.nextUrl.searchParams;
   return NextResponse.json({
     posts: await listPosts(user.id, {
@@ -20,8 +21,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await authByApiKey(req);
-  if (!user) return unauthorized();
+  const auth = await authV1(req);
+  if (auth instanceof NextResponse) return auth;
+  const user = auth;
   const body = (await req.json().catch(() => null)) as PostInput | null;
   if (!body) return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   const result = await createPost(user, body);
