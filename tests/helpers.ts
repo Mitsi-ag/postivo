@@ -69,18 +69,33 @@ export function pastIso(minAgo = 2): string {
 
 // Direct DB access for arranging states the UI can't reach quickly
 // (e.g. a permanently failed target without waiting out the retry backoff).
-export async function failPostInDb(postId: string, message = 'simulated failure'): Promise<void> {
+export async function dbQuery<T = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<T[]> {
   const client = new pg.Client({
     connectionString: process.env.DATABASE_URL ?? 'postgres://postivo:postivo@localhost:5432/postivo',
   });
   await client.connect();
   try {
-    await client.query(`UPDATE post_targets SET status = 'failed', error = $1, retry_count = 3 WHERE post_id = $2`, [
-      message,
-      postId,
-    ]);
-    await client.query(`UPDATE posts SET status = 'failed', updated_at = now() WHERE id = $1`, [postId]);
+    const res = await client.query(text, params);
+    return res.rows as T[];
   } finally {
     await client.end();
+  }
+}
+
+export async function failPostInDb(postId: string, message = 'simulated failure'): Promise<void> {
+  await dbQuery(`UPDATE post_targets SET status = 'failed', error = $1, retry_count = 3 WHERE post_id = $2`, [
+    message,
+    postId,
+  ]);
+  await dbQuery(`UPDATE posts SET status = 'failed', updated_at = now() WHERE id = $1`, [postId]);
+}
+
+// Poll a DB assertion until it holds or the deadline passes.
+export async function waitForDb(assertion: () => Promise<boolean>, timeoutMs = 120_000, intervalMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await assertion()) return;
+    if (Date.now() > deadline) throw new Error('waitForDb: timed out');
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
