@@ -26,6 +26,12 @@ function expectNoStackLeak(body: string): void {
   expect(body).not.toMatch(/\n\s+at\s+\S+\s+\(/);
 }
 
+// Extract the session cookie value from a login/register response.
+function sessionCookieValue(res: { headersArray(): { name: string; value: string }[] }): string {
+  const header = res.headersArray().find((h) => h.name.toLowerCase() === 'set-cookie')?.value ?? '';
+  return header.match(/postivo_session=([^;]*)/)?.[1] ?? '';
+}
+
 test('authz: user A cannot touch user B resources', async () => {
   const a = await newUserCtx('alice');
   const b = await newUserCtx('bob');
@@ -164,6 +170,74 @@ test('rate limiting: 11th login attempt in 5 min → 429', async () => {
   await ctx.dispose();
 });
 
+test('rate limiting: spoofed leftmost X-Forwarded-For does not bypass the bucket', async () => {
+  // The limiter must key on the LAST XFF entry (proxy-appended client IP), so
+  // prepending a fresh fake IP per request must not reset the bucket.
+  const realIp = `203.0.113.${((parseInt(RUN.replace(/[^a-z0-9]/g, ''), 36) + 100) % 250) + 1}`;
+  const ctx = await request.newContext();
+  let lastStatus = 0;
+  for (let i = 1; i <= 11; i++) {
+    const res = await ctx.post('/api/auth/login', {
+      headers: { 'x-forwarded-for': `10.99.99.${i}, ${realIp}` },
+      data: { email: `spoof-${RUN}@postivo.dev`, password: 'wrong-pass-123' },
+    });
+    lastStatus = res.status();
+    if (i <= 10) expect(res.status(), `attempt ${i}`).toBe(401);
+  }
+  expect(lastStatus, 'spoofed XFF must still hit the limit').toBe(429);
+  await ctx.dispose();
+});
+
+test('sessions: password change kills stolen + other-device cookies, changer stays in', async () => {
+  const ctx = await newUserCtx('sess-revoke');
+  const me = await ctx.get('/api/auth/me');
+  const { user } = (await me.json()) as { user: { id: string; email: string } };
+
+  // Capture a raw cookie ("stolen") via a fresh login, plus a second device.
+  const login1 = await ctx.post('/api/auth/login', {
+    data: { email: user.email, password: 'sec-pass-1234' },
+  });
+  const stolen = sessionCookieValue(login1);
+  expect(stolen).not.toBe('');
+  const device2 = await request.newContext({ extraHTTPHeaders: { 'x-forwarded-for': nextIp() } });
+  const login = await device2.post('/api/auth/login', {
+    data: { email: user.email, password: 'sec-pass-1234' },
+  });
+  expect(login.ok()).toBeTruthy();
+
+  // Change the password from device 1.
+  const change = await ctx.post('/api/settings/password', {
+    data: { current: 'sec-pass-1234', next: 'sec-pass-5678' },
+  });
+  expect(change.ok()).toBeTruthy();
+
+  // Stolen cookie → dead. Other device → dead. Changer → still valid.
+  const thief = await request.newContext();
+  const replay = await thief.get('/api/auth/me', { headers: { cookie: `postivo_session=${stolen}` } });
+  expect(replay.status()).toBe(401);
+  expect((await device2.get('/api/auth/me')).status()).toBe(401);
+  expect((await ctx.get('/api/auth/me')).status()).toBe(200);
+  await thief.dispose();
+  await device2.dispose();
+  await ctx.dispose();
+});
+
+test('sessions: logout revokes the server-side session', async () => {
+  const ctx = await newUserCtx('sess-logout');
+  const me = await ctx.get('/api/auth/me');
+  const { user } = (await me.json()) as { user: { email: string } };
+  const login = await ctx.post('/api/auth/login', { data: { email: user.email, password: 'sec-pass-1234' } });
+  const cookie = sessionCookieValue(login);
+  expect(cookie).not.toBe('');
+  const out = await ctx.post('/api/auth/logout');
+  expect(out.ok()).toBeTruthy();
+  // Replaying the pre-logout cookie must fail even though it would still be
+  // a valid HMAC token — the session row is revoked.
+  const replay = await ctx.get('/api/auth/me', { headers: { cookie: `postivo_session=${cookie}` } });
+  expect(replay.status()).toBe(401);
+  await ctx.dispose();
+});
+
 test('SQL injection probes on filter params → no 500s', async () => {
   const ctx = await newUserCtx('sqli');
   const probes = [
@@ -190,6 +264,9 @@ test('security headers present on pages and API responses', async () => {
     expect(res.headers()['x-frame-options']).toBe('DENY');
     expect(res.headers()['x-content-type-options']).toBe('nosniff');
     expect(res.headers()['referrer-policy']).toBeTruthy();
+    expect(res.headers()['strict-transport-security']).toContain('max-age=63072000');
+    expect(res.headers()['content-security-policy']).toContain("default-src 'self'");
+    expect(res.headers()['x-powered-by']).toBeUndefined();
   }
   await ctx.dispose();
 });
