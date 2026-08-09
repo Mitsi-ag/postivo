@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
-import { Badge, cardCls, EmptyState, ErrorBanner, inputCls, Skeleton } from '@/components/ui';
+import { Badge, cardCls, EmptyState, ErrorBanner, selectCls, Skeleton } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PostDTO } from '@/lib/types';
 
@@ -118,7 +118,7 @@ export default function CalendarPage() {
         key={key}
         onClick={() => setSelectedDay(active ? null : key)}
         aria-label={`${dayPosts.length} posts on ${key}`}
-        className={`min-h-20 rounded-lg border p-1.5 text-left align-top transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
+        className={`flex min-h-20 flex-col rounded-lg border p-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
           active ? 'border-indigo-500 bg-indigo-950/40' : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'
         } ${extraCls}`}
       >
@@ -147,7 +147,7 @@ export default function CalendarPage() {
             aria-label="Filter by channel"
             value={channelFilter}
             onChange={(e) => setChannelFilter(e.target.value)}
-            className={`${inputCls} w-auto text-xs`}
+            className={`${selectCls} w-auto text-xs`}
           >
             <option value="">All channels</option>
             {channels.map((c) => (
@@ -160,7 +160,7 @@ export default function CalendarPage() {
             aria-label="Filter by tag"
             value={tagFilter}
             onChange={(e) => setTagFilter(e.target.value)}
-            className={`${inputCls} w-auto text-xs`}
+            className={`${selectCls} w-auto text-xs`}
           >
             <option value="">All tags</option>
             {allTags.map((t) => (
@@ -186,6 +186,7 @@ export default function CalendarPage() {
                 key={v}
                 onClick={() => {
                   setView(v);
+                  setCursor(new Date());
                   setSelectedDay(null);
                 }}
                 aria-pressed={view === v}

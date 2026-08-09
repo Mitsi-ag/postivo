@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
-import { Badge, btnDanger, btnGhost, cardCls, EmptyState, ErrorBanner, inputCls, SkeletonCards, TagChip } from '@/components/ui';
+import { Badge, btnDanger, btnGhost, cardCls, EmptyState, ErrorBanner, selectCls, SkeletonCards, TagChip } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PostDTO, TargetDTO } from '@/lib/types';
 
@@ -119,13 +119,13 @@ function QueueInner() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search content…"
             aria-label="Search posts"
-            className={`${inputCls} w-44 text-xs`}
+            className={`${selectCls} w-44 text-xs`}
           />
           <select
             aria-label="Filter by tag"
             value={tagFilter}
             onChange={(e) => setTagFilter(e.target.value)}
-            className={`${inputCls} w-auto text-xs`}
+            className={`${selectCls} w-auto text-xs`}
           >
             <option value="">All tags</option>
             {allTags.map((t) => (
@@ -138,7 +138,7 @@ function QueueInner() {
             aria-label="Filter by channel"
             value={channelFilter}
             onChange={(e) => setChannelFilter(e.target.value)}
-            className={`${inputCls} w-auto text-xs`}
+            className={`${selectCls} w-auto text-xs`}
           >
             <option value="">All channels</option>
             {channels.map((c) => (
