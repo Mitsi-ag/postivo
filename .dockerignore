@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+data
+*.log
+.env
+.env.*
+!.env.example
+deploy
+scripts
+Dockerfile
+docker-compose.yml
+.DS_Store

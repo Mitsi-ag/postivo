@@ -1,0 +1,21 @@
+# Local development database. The app itself runs with `npm run dev` /
+# `npm run start` — only Postgres is containerized here.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postivo
+      POSTGRES_PASSWORD: postivo
+      POSTGRES_DB: postivo
+    ports:
+      - '5432:5432'
+    volumes:
+      - postivo-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postivo -d postivo']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postivo-pgdata:
