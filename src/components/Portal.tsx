@@ -30,7 +30,7 @@ export default function Portal({ title, children }: { title: string; children: R
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/');
+    router.push('/login');
   }
 
   return (

@@ -12,7 +12,7 @@ export interface PlanLimits {
 
 export const PLANS: Record<PlanId, PlanLimits> = {
   free: { channels: 3, postsPerMonth: 30, aiCaptions: false, label: 'Free', price: '$0' },
-  pro: { channels: 100, postsPerMonth: 10_000, aiCaptions: true, label: 'Pro', price: '$12/mo' },
+  pro: { channels: 100, postsPerMonth: 10_000, aiCaptions: true, label: 'Pro', price: '$9/mo' },
 };
 
 export function planOf(user: Pick<User, 'plan'>): PlanLimits {

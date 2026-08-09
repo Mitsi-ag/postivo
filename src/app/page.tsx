@@ -135,7 +135,7 @@ export default function Landing() {
             </span>
             <h3 className="text-lg font-semibold text-white">Pro</h3>
             <p className="mt-1 text-3xl font-bold text-white">
-              $12<span className="text-base font-normal text-slate-400">/mo</span>
+              $9<span className="text-base font-normal text-slate-400">/mo</span>
             </p>
             <ul className="mt-4 space-y-2 text-sm text-slate-300">
               <li>✓ 100 connected channels</li>

@@ -112,7 +112,7 @@ export default function BillingPage() {
             </ul>
           </div>
           <div>
-            <h3 className="font-semibold text-white">⚡ Pro — $12/mo</h3>
+            <h3 className="font-semibold text-white">⚡ Pro — $9/mo</h3>
             <ul className="mt-2 space-y-1 text-sm text-slate-400">
               <li>100 channels</li>
               <li>10,000 scheduled posts / month</li>
