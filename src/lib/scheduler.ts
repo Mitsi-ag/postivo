@@ -259,14 +259,21 @@ async function claimDueComments(): Promise<DueComment[]> {
              (c2.status = 'pending' AND c2.publish_at <= now() AND (c2.next_retry_at IS NULL OR c2.next_retry_at <= now()))
              OR (c2.status = 'publishing' AND c2.next_retry_at <= now())
            )
-         ORDER BY c2.publish_at ASC
+           -- Thread integrity: never publish a follow-up while an earlier one
+           -- in the same thread is not yet published (no leapfrogging).
+           AND NOT EXISTS (
+             SELECT 1 FROM post_targets_comments e
+             WHERE e.target_id = c2.target_id AND e.idx < c2.idx AND e.status <> 'published'
+           )
+         ORDER BY c2.publish_at ASC, c2.idx ASC
          LIMIT ${BATCH_SIZE}
          FOR UPDATE OF c2 SKIP LOCKED
        )
        RETURNING c.*
      )
      SELECT cl.*, t.channel_id AS channel_id, t.external_id AS external_id_target, t.post_id AS post_id
-     FROM claimed cl JOIN post_targets t ON t.id = cl.target_id`,
+     FROM claimed cl JOIN post_targets t ON t.id = cl.target_id
+     ORDER BY cl.publish_at ASC, cl.idx ASC`,
   );
 }
 
@@ -303,6 +310,16 @@ async function processComment(row: DueComment): Promise<void> {
         row.id,
       ]);
       await log(row.target_id, 'error', `Comment #${row.idx + 1} failed permanently after ${attempts} attempts: ${message}`);
+      // The thread is broken — skip every later follow-up so it can't
+      // leapfrog the failed one or hang in 'pending' forever.
+      const skipped = await query<{ id: string }>(
+        `UPDATE post_targets_comments SET status = 'failed', error = 'skipped: earlier comment in thread failed'
+         WHERE target_id = $1 AND idx > $2 AND status IN ('pending','publishing') RETURNING id`,
+        [row.target_id, row.idx],
+      );
+      if (skipped.length > 0) {
+        await log(row.target_id, 'warn', `Skipped ${skipped.length} later comment(s): earlier comment in thread failed`);
+      }
     } else {
       await query(
         `UPDATE post_targets_comments
@@ -354,6 +371,9 @@ async function processFeed(feed: RssFeed): Promise<void> {
   if (!res.ok) throw new Error(`feed responded ${res.status}`);
   const xml = await res.text();
   const items = parseFeed(xml);
+  if (items.length === 0) {
+    console.error(`[postivo] rss feed ${feed.id} (${feed.url}): fetched OK but parsed 0 items (malformed or empty feed?)`);
+  }
   const fresh = newItems(items, feed.last_item_guid);
   const channelIds = Array.isArray(feed.channel_ids) ? feed.channel_ids : [];
 
