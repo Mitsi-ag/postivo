@@ -232,3 +232,24 @@ bash scripts/smoke.sh        # end-to-end smoke test against a running server (P
 ## License
 
 MIT. Do whatever you want.
+
+---
+
+## Production (live)
+
+**https://82g4qd2zpd.ap-southeast-2.awsapprunner.com**
+
+AWS (ap-southeast-2, acct 102301143129) — minimal autoscaling footprint:
+- **App Runner** service `postivo` (0.25 vCPU / 0.5 GB, autoscales 1→10 instances @ 100 concurrent req each)
+- **RDS** `postivo-db` (Postgres 16, db.t4g.micro) · **S3** `postivo-media-102301143129` · **ECR** `postivo`
+- Secrets in Secrets Manager: `postivo/prod` (also `~/.config/postivo/`)
+
+Redeploy after code changes:
+```bash
+AWS_REGION=ap-southeast-2 bash deploy/deploy.sh   # build → push → auto-deploys (URL stays stable)
+```
+
+To enable Stripe billing: create product/price, then update App Runner env
+`STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET` (webhook URL: `<APP_URL>/api/billing/webhook`).
+
+Mobile apps: `github.com/Mitsi-ag/postivo-mobile` — signed IPA + AAB/APK in `artifacts/`; iOS submission via `scripts/finish_ios.sh` after creating the ASC app record.
