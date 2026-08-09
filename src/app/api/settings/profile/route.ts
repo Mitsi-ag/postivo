@@ -5,6 +5,9 @@ import { one, query, type User } from '@/lib/db';
 interface ProfileBody {
   name?: string;
   timezone?: string;
+  signature?: string;
+  signature_enabled?: boolean;
+  outbound_webhook_url?: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -15,7 +18,19 @@ export async function POST(req: NextRequest) {
   const name = (body.name ?? user.name).trim();
   const timezone = (body.timezone ?? user.timezone).trim() || 'UTC';
   if (!name) return NextResponse.json({ error: 'Name cannot be empty' }, { status: 400 });
-  await query('UPDATE users SET name = $1, timezone = $2 WHERE id = $3', [name, timezone, user.id]);
+  const signature = body.signature !== undefined ? body.signature.slice(0, 500) : user.signature;
+  const signatureEnabled = body.signature_enabled !== undefined ? body.signature_enabled === true : user.signature_enabled;
+  let webhookUrl = body.outbound_webhook_url !== undefined ? body.outbound_webhook_url : user.outbound_webhook_url;
+  if (webhookUrl) {
+    webhookUrl = webhookUrl.trim() || null;
+    if (webhookUrl && !/^https?:\/\//.test(webhookUrl)) {
+      return NextResponse.json({ error: 'outbound_webhook_url must be an http(s) URL' }, { status: 400 });
+    }
+  }
+  await query(
+    'UPDATE users SET name = $1, timezone = $2, signature = $3, signature_enabled = $4, outbound_webhook_url = $5 WHERE id = $6',
+    [name, timezone, signature ?? '', signatureEnabled, webhookUrl ?? null, user.id],
+  );
   const updated = await one<User>('SELECT * FROM users WHERE id = $1', [user.id]);
   return NextResponse.json({ user: publicUser(updated as User) });
 }

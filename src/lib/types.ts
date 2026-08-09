@@ -7,6 +7,9 @@ export interface PublicUser {
   name: string;
   timezone: string;
   plan: string; // 'free' | 'pro'
+  signature: string;
+  signature_enabled: boolean;
+  outbound_webhook_url: string | null;
   created_at: string;
 }
 
@@ -25,6 +28,8 @@ export interface ProviderMeta {
   color: string;
   maxLength: number;
   supportsMedia: boolean;
+  supportsReply: boolean;
+  supportsStats: boolean;
   fields: ProviderField[];
 }
 
@@ -48,7 +53,14 @@ export interface TargetDTO {
   retry_count: number;
   next_retry_at: string | null;
   external_url: string | null;
+  external_id: string | null;
+  stats: Record<string, number>;
   content_override: string | null;
+}
+
+export interface PostCommentDTO {
+  content: string;
+  delayMin: number;
 }
 
 export interface PostDTO {
@@ -57,6 +69,9 @@ export interface PostDTO {
   media: string[];
   scheduled_at: string | null;
   status: string;
+  comments: PostCommentDTO[];
+  repeat_every_days: number | null;
+  tags: string[];
   created_at: string;
   updated_at: string;
   targets: TargetDTO[];
@@ -84,7 +99,35 @@ export interface AnalyticsDTO {
     publishedThisWeek: number;
     failed: number;
   };
+  engagement: { likes: number; reposts: number; replies: number; views: number; comments: number };
   byProvider: { provider: string; count: number }[];
   last14Days: { date: string; count: number }[];
   recentLog: { id: number; at: string; level: string; message: string }[];
+}
+
+export interface MediaListItemDTO {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  url: string;
+  created_at: string;
+}
+
+export interface RssFeedDTO {
+  id: string;
+  url: string;
+  channel_ids: string[];
+  interval_min: number;
+  ai_caption: boolean;
+  last_item_guid: string | null;
+  last_polled_at: string | null;
+  created_at: string;
+}
+
+export interface ChannelSetDTO {
+  id: string;
+  name: string;
+  channel_ids: string[];
+  created_at: string;
 }

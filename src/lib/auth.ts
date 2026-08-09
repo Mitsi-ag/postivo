@@ -90,7 +90,17 @@ export function detachSession(res: NextResponse): void {
 // ---------- request auth ----------
 
 export function publicUser(u: User): PublicUser {
-  return { id: u.id, email: u.email, name: u.name, timezone: u.timezone, plan: u.plan, created_at: u.created_at };
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    timezone: u.timezone,
+    plan: u.plan,
+    signature: u.signature ?? '',
+    signature_enabled: u.signature_enabled === true,
+    outbound_webhook_url: u.outbound_webhook_url ?? null,
+    created_at: u.created_at,
+  };
 }
 
 export async function getSessionUser(req: NextRequest): Promise<User | null> {

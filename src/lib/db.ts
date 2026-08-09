@@ -30,6 +30,9 @@ export interface User {
   plan: string; // 'free' | 'pro'
   stripe_customer_id: string | null;
   plan_renews_at: string | null;
+  signature: string;
+  signature_enabled: boolean;
+  outbound_webhook_url: string | null;
   created_at: string;
 }
 
@@ -55,6 +58,11 @@ export interface Channel {
 
 export type PostStatus = 'draft' | 'scheduled' | 'published' | 'failed';
 
+export interface PostComment {
+  content: string;
+  delayMin: number;
+}
+
 export interface Post {
   id: string;
   user_id: string;
@@ -62,6 +70,9 @@ export interface Post {
   media: string[]; // jsonb array of media ids
   scheduled_at: string | null;
   status: PostStatus;
+  comments: PostComment[]; // jsonb: [{content, delayMin}]
+  repeat_every_days: number | null;
+  tags: string[]; // jsonb array of strings
   created_at: string;
   updated_at: string;
 }
@@ -79,12 +90,52 @@ export interface PostTarget {
   retry_count: number;
   next_retry_at: string | null;
   external_url: string | null;
+  external_id: string | null;
+  stats: Record<string, number>; // jsonb
+}
+
+export type CommentStatus = 'pending' | 'publishing' | 'published' | 'failed';
+
+export interface TargetComment {
+  id: string;
+  target_id: string;
+  idx: number;
+  content: string;
+  publish_at: string;
+  status: CommentStatus;
+  external_id: string | null;
+  error: string | null;
+  retry_count: number;
+  next_retry_at: string | null;
+  published_at: string | null;
+}
+
+export interface RssFeed {
+  id: string;
+  user_id: string;
+  url: string;
+  channel_ids: string[]; // jsonb
+  interval_min: number;
+  ai_caption: boolean;
+  last_item_guid: string | null;
+  last_polled_at: string | null;
+  created_at: string;
+}
+
+export interface ChannelSet {
+  id: string;
+  user_id: string;
+  name: string;
+  channel_ids: string[]; // jsonb
+  created_at: string;
 }
 
 export interface MediaItem {
   id: string;
   user_id: string;
   mime: string;
+  name: string;
+  size: number;
   created_at: string;
 }
 
@@ -161,6 +212,52 @@ const SCHEMA = `
     level TEXT NOT NULL,
     message TEXT NOT NULL
   );
+  -- Phase 1 additions (idempotent on existing databases)
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS signature TEXT NOT NULL DEFAULT '';
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS signature_enabled BOOLEAN NOT NULL DEFAULT false;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS outbound_webhook_url TEXT;
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS repeat_every_days INTEGER;
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE post_targets ADD COLUMN IF NOT EXISTS external_id TEXT;
+  ALTER TABLE post_targets ADD COLUMN IF NOT EXISTS stats jsonb NOT NULL DEFAULT '{}';
+  ALTER TABLE media ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE media ADD COLUMN IF NOT EXISTS size INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS post_targets_comments (
+    id TEXT PRIMARY KEY,
+    target_id TEXT NOT NULL,
+    idx INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    publish_at timestamptz NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    external_id TEXT,
+    error TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_at timestamptz,
+    published_at timestamptz
+  );
+  CREATE TABLE IF NOT EXISTS rss_feeds (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    channel_ids jsonb NOT NULL DEFAULT '[]',
+    interval_min INTEGER NOT NULL DEFAULT 60,
+    ai_caption BOOLEAN NOT NULL DEFAULT false,
+    last_item_guid TEXT,
+    last_polled_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE IF NOT EXISTS sets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    channel_ids jsonb NOT NULL DEFAULT '[]',
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_comments_due ON post_targets_comments(status, publish_at);
+  CREATE INDEX IF NOT EXISTS idx_comments_target ON post_targets_comments(target_id);
+  CREATE INDEX IF NOT EXISTS idx_rss_user ON rss_feeds(user_id);
+  CREATE INDEX IF NOT EXISTS idx_sets_user ON sets(user_id);
   CREATE INDEX IF NOT EXISTS idx_posts_user ON posts(user_id);
   CREATE INDEX IF NOT EXISTS idx_targets_post ON post_targets(post_id);
   CREATE INDEX IF NOT EXISTS idx_targets_channel ON post_targets(channel_id);
