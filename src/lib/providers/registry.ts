@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Channel } from '../db';
-import { assertPublicUrl } from '../ssrf';
+import { guardedFetch } from '../ssrf';
 import type { ProviderField, ProviderMeta } from '../types';
 
 export interface PublishContext {
@@ -35,9 +35,19 @@ export interface Provider {
   stats?(channel: Channel, externalId: string): Promise<Record<string, number> | null>;
 }
 
-async function readError(res: Response): Promise<string> {
-  const text = await res.text().catch(() => '');
-  return text.slice(0, 300);
+// Provider error bodies can contain internal details — log them server-side
+// only. What reaches post_targets.error / publish_log / the UI is always a
+// generic "returned HTTP <code>" message with no response-body content.
+async function httpError(label: string, res: Response): Promise<Error> {
+  const body = await res.text().catch(() => '');
+  console.error(`[postivo] ${label}: HTTP ${res.status} — ${body.slice(0, 500)}`);
+  return new Error(`${label} returned HTTP ${res.status}`);
+}
+
+// Non-HTTP provider errors parsed from response bodies: same rule.
+function bodyError(label: string, detail: string): Error {
+  console.error(`[postivo] ${label}: ${detail.slice(0, 500)}`);
+  return new Error(`${label} returned an error`);
 }
 
 function firstLine(content: string, fallback = 'Untitled', max = 100): string {
@@ -48,12 +58,12 @@ function firstLine(content: string, fallback = 'Untitled', max = 100): string {
 
 async function blueskySession(creds: Record<string, string>): Promise<{ jwt: string; did: string; handle: string }> {
   if (!creds.handle || !creds.appPassword) throw new Error('Bluesky handle and app password are required');
-  const login = await fetch('https://bsky.social/xrpc/com.atproto.server.createSession', {
+  const login = await guardedFetch('https://bsky.social/xrpc/com.atproto.server.createSession', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ identifier: creds.handle, password: creds.appPassword }),
   });
-  if (!login.ok) throw new Error(`Bluesky login failed (${login.status}): ${await readError(login)}`);
+  if (!login.ok) throw await httpError('Bluesky login', login);
   const session = (await login.json()) as { accessJwt?: string; did?: string; handle?: string };
   if (!session.accessJwt || !session.did) throw new Error('Bluesky login returned no session');
   return { jwt: session.accessJwt, did: session.did, handle: session.handle ?? session.did };
@@ -109,15 +119,14 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content, mediaUrls, ctx) {
       if (!creds.url) throw new Error('Webhook URL is missing');
-      await assertPublicUrl(creds.url); // SSRF guard
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (creds.secret) headers['x-postivo-secret'] = creds.secret;
-      const res = await fetch(creds.url, {
+      const res = await guardedFetch(creds.url, {
         method: 'POST',
         headers,
         body: JSON.stringify({ content, media: mediaUrls, scheduled_at: ctx.scheduledAt, id: ctx.postId }),
       });
-      if (!res.ok) throw new Error(`Webhook responded ${res.status}: ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Webhook', res);
       return {};
     },
   },
@@ -134,7 +143,7 @@ export const providers: Provider[] = [
     ],
     async publish(channel, creds, content) {
       const session = await blueskySession(creds);
-      const res = await fetch('https://bsky.social/xrpc/app.bsky.feed.post', {
+      const res = await guardedFetch('https://bsky.social/xrpc/app.bsky.feed.post', {
         method: 'POST',
         headers: { authorization: `Bearer ${session.jwt}`, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -143,7 +152,7 @@ export const providers: Provider[] = [
           record: { $type: 'app.bsky.feed.post', text: content.slice(0, 300), createdAt: new Date().toISOString() },
         }),
       });
-      if (!res.ok) throw new Error(`Bluesky post failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Bluesky post', res);
       const data = (await res.json()) as { uri?: string };
       const rkey = data.uri?.split('/').pop();
       return {
@@ -155,15 +164,15 @@ export const providers: Provider[] = [
       const creds = channel.credentials ?? {};
       const session = await blueskySession(creds);
       // Resolve the parent's CID (required for a reply reference).
-      const get = await fetch(
+      const get = await guardedFetch(
         `https://bsky.social/xrpc/app.bsky.feed.getPosts?uris=${encodeURIComponent(externalId)}`,
         { headers: { authorization: `Bearer ${session.jwt}` } },
       );
-      if (!get.ok) throw new Error(`Bluesky could not load parent post (${get.status}): ${await readError(get)}`);
+      if (!get.ok) throw await httpError('Bluesky could not load parent post', get);
       const posts = ((await get.json()) as { posts?: { uri: string; cid: string }[] }).posts ?? [];
       if (!posts[0]) throw new Error('Bluesky parent post not found for reply');
       const ref = { uri: posts[0].uri, cid: posts[0].cid };
-      const res = await fetch('https://bsky.social/xrpc/app.bsky.feed.post', {
+      const res = await guardedFetch('https://bsky.social/xrpc/app.bsky.feed.post', {
         method: 'POST',
         headers: { authorization: `Bearer ${session.jwt}`, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -177,7 +186,7 @@ export const providers: Provider[] = [
           },
         }),
       });
-      if (!res.ok) throw new Error(`Bluesky reply failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Bluesky reply', res);
       const data = (await res.json()) as { uri?: string };
       const rkey = data.uri?.split('/').pop();
       return {
@@ -186,7 +195,7 @@ export const providers: Provider[] = [
       };
     },
     async stats(_channel, externalId) {
-      const res = await fetch(
+      const res = await guardedFetch(
         `https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts?uris=${encodeURIComponent(externalId)}`,
       );
       if (!res.ok) return null;
@@ -211,12 +220,12 @@ export const providers: Provider[] = [
       if (!creds.instanceUrl || !creds.accessToken) throw new Error('Mastodon instance URL and access token are required');
       const instance = creds.instanceUrl.replace(/\/+$/, '');
       const status = mediaUrls.length ? `${content}\n\n${mediaUrls.join('\n')}` : content;
-      const res = await fetch(`${instance}/api/v1/statuses`, {
+      const res = await guardedFetch(`${instance}/api/v1/statuses`, {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.accessToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error(`Mastodon post failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Mastodon post', res);
       const data = (await res.json()) as { url?: string; id?: string };
       return { externalUrl: data.url, externalId: data.id };
     },
@@ -224,12 +233,12 @@ export const providers: Provider[] = [
       const creds = channel.credentials ?? {};
       if (!creds.instanceUrl || !creds.accessToken) throw new Error('Mastodon instance URL and access token are required');
       const instance = creds.instanceUrl.replace(/\/+$/, '');
-      const res = await fetch(`${instance}/api/v1/statuses`, {
+      const res = await guardedFetch(`${instance}/api/v1/statuses`, {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.accessToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ status: content, in_reply_to_id: externalId }),
       });
-      if (!res.ok) throw new Error(`Mastodon reply failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Mastodon reply', res);
       const data = (await res.json()) as { url?: string; id?: string };
       return { externalUrl: data.url, externalId: data.id };
     },
@@ -237,7 +246,7 @@ export const providers: Provider[] = [
       const creds = channel.credentials ?? {};
       if (!creds.instanceUrl || !creds.accessToken) return null;
       const instance = creds.instanceUrl.replace(/\/+$/, '');
-      const res = await fetch(`${instance}/api/v1/statuses/${encodeURIComponent(externalId)}`, {
+      const res = await guardedFetch(`${instance}/api/v1/statuses/${encodeURIComponent(externalId)}`, {
         headers: { authorization: `Bearer ${creds.accessToken}` },
       });
       if (!res.ok) return null;
@@ -260,19 +269,19 @@ export const providers: Provider[] = [
     async publish(_channel, creds, content) {
       if (!creds.apiKey) throw new Error('DEV API key is required');
       const title = firstLine(content);
-      const res = await fetch('https://dev.to/api/articles', {
+      const res = await guardedFetch('https://dev.to/api/articles', {
         method: 'POST',
         headers: { 'api-key': creds.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({ article: { title, body_markdown: content, published: true } }),
       });
-      if (!res.ok) throw new Error(`DEV publish failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('DEV publish', res);
       const data = (await res.json()) as { url?: string; id?: number };
       return { externalUrl: data.url, externalId: data.id ? String(data.id) : undefined };
     },
     async stats(channel, externalId) {
       const creds = channel.credentials ?? {};
       if (!creds.apiKey) return null;
-      const res = await fetch(`https://dev.to/api/articles/${encodeURIComponent(externalId)}`, {
+      const res = await guardedFetch(`https://dev.to/api/articles/${encodeURIComponent(externalId)}`, {
         headers: { 'api-key': creds.apiKey },
       });
       if (!res.ok) return null;
@@ -307,12 +316,12 @@ export const providers: Provider[] = [
       if (!creds.bearerToken) {
         throw new Error('X requires an OAuth2 user-context access token with the tweet.write scope');
       }
-      const res = await fetch('https://api.x.com/2/tweets', {
+      const res = await guardedFetch('https://api.x.com/2/tweets', {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.bearerToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ text: content.slice(0, 280) }),
       });
-      if (!res.ok) throw new Error(`X API error (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('X API', res);
       const data = (await res.json()) as { data?: { id?: string } };
       return {
         externalUrl: data.data?.id ? `https://x.com/i/web/status/${data.data.id}` : undefined,
@@ -324,7 +333,7 @@ export const providers: Provider[] = [
       if (!creds.bearerToken) {
         throw new Error('X requires an OAuth2 user-context access token with the tweet.write scope');
       }
-      const res = await fetch('https://api.x.com/2/tweets', {
+      const res = await guardedFetch('https://api.x.com/2/tweets', {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.bearerToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -332,7 +341,7 @@ export const providers: Provider[] = [
           reply: { in_reply_to_tweet_id: externalId },
         }),
       });
-      if (!res.ok) throw new Error(`X reply failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('X reply', res);
       const data = (await res.json()) as { data?: { id?: string } };
       return {
         externalUrl: data.data?.id ? `https://x.com/i/web/status/${data.data.id}` : undefined,
@@ -353,7 +362,7 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content) {
       if (!creds.accessToken || !creds.personUrn) throw new Error('LinkedIn access token and person URN are required');
-      const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+      const res = await guardedFetch('https://api.linkedin.com/v2/ugcPosts', {
         method: 'POST',
         headers: {
           authorization: `Bearer ${creds.accessToken}`,
@@ -372,7 +381,7 @@ export const providers: Provider[] = [
           visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
         }),
       });
-      if (!res.ok) throw new Error(`LinkedIn publish failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('LinkedIn publish', res);
       const id = res.headers.get('x-restli-id') || ((await res.json().catch(() => ({}))) as { id?: string }).id;
       return { externalUrl: id ? `https://www.linkedin.com/feed/update/${id}/` : undefined, externalId: id };
     },
@@ -390,20 +399,20 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content) {
       if (!creds.botToken || !creds.chatId) throw new Error('Telegram bot token and chat ID are required');
-      const res = await fetch(`https://api.telegram.org/bot${creds.botToken}/sendMessage`, {
+      const res = await guardedFetch(`https://api.telegram.org/bot${creds.botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chat_id: creds.chatId, text: content.slice(0, 4096) }),
       });
-      if (!res.ok) throw new Error(`Telegram sendMessage failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Telegram sendMessage', res);
       const data = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string };
-      if (!data.ok) throw new Error(`Telegram error: ${data.description ?? 'unknown'}`);
+      if (!data.ok) throw bodyError('Telegram sendMessage', data.description ?? 'unknown');
       return { externalId: data.result?.message_id ? String(data.result.message_id) : undefined };
     },
     async reply(channel, externalId, content) {
       const creds = channel.credentials ?? {};
       if (!creds.botToken || !creds.chatId) throw new Error('Telegram bot token and chat ID are required');
-      const res = await fetch(`https://api.telegram.org/bot${creds.botToken}/sendMessage`, {
+      const res = await guardedFetch(`https://api.telegram.org/bot${creds.botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -412,9 +421,9 @@ export const providers: Provider[] = [
           reply_to_message_id: Number(externalId),
         }),
       });
-      if (!res.ok) throw new Error(`Telegram reply failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Telegram reply', res);
       const data = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string };
-      if (!data.ok) throw new Error(`Telegram reply error: ${data.description ?? 'unknown'}`);
+      if (!data.ok) throw bodyError('Telegram reply', data.description ?? 'unknown');
       return { externalId: data.result?.message_id ? String(data.result.message_id) : undefined };
     },
   },
@@ -429,12 +438,12 @@ export const providers: Provider[] = [
     async publish(_channel, creds, content) {
       if (!creds.webhookUrl) throw new Error('Discord webhook URL is missing');
       const url = creds.webhookUrl + (creds.webhookUrl.includes('?') ? '&' : '?') + 'wait=true';
-      const res = await fetch(url, {
+      const res = await guardedFetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ content: content.slice(0, 2000) }),
       });
-      if (!res.ok) throw new Error(`Discord webhook failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Discord webhook', res);
       const data = (await res.json().catch(() => ({}))) as { id?: string; channel_id?: string };
       return {
         externalId: data.id,
@@ -455,14 +464,14 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content) {
       if (!creds.webhookUrl) throw new Error('Slack webhook URL is missing');
-      const res = await fetch(creds.webhookUrl, {
+      const res = await guardedFetch(creds.webhookUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: content }),
       });
-      if (!res.ok) throw new Error(`Slack webhook failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Slack webhook', res);
       const body = (await res.text().catch(() => '')).trim();
-      if (body && body !== 'ok') throw new Error(`Slack webhook error: ${body.slice(0, 200)}`);
+      if (body && body !== 'ok') throw bodyError('Slack webhook', body);
       return {};
     },
   },
@@ -485,7 +494,7 @@ export const providers: Provider[] = [
         if (!creds[k]) throw new Error(`Reddit ${k} is required`);
       }
       const auth = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
-      const tokenRes = await fetch('https://www.reddit.com/api/v1/access_token', {
+      const tokenRes = await guardedFetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
         headers: {
           authorization: `Basic ${auth}`,
@@ -498,10 +507,10 @@ export const providers: Provider[] = [
           password: creds.password,
         }),
       });
-      if (!tokenRes.ok) throw new Error(`Reddit OAuth failed (${tokenRes.status}): ${await readError(tokenRes)}`);
+      if (!tokenRes.ok) throw await httpError('Reddit OAuth', tokenRes);
       const token = ((await tokenRes.json()) as { access_token?: string }).access_token;
       if (!token) throw new Error('Reddit OAuth returned no access token (check app type is "script")');
-      const res = await fetch('https://oauth.reddit.com/api/submit', {
+      const res = await guardedFetch('https://oauth.reddit.com/api/submit', {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'user-agent': 'postivo/1.0' },
         body: JSON.stringify({
@@ -511,11 +520,11 @@ export const providers: Provider[] = [
           kind: 'self',
         }),
       });
-      if (!res.ok) throw new Error(`Reddit submit failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Reddit submit', res);
       const data = (await res.json()) as {
         json?: { errors?: unknown[]; data?: { url?: string; id?: string; name?: string } };
       };
-      if (data.json?.errors?.length) throw new Error(`Reddit submit error: ${JSON.stringify(data.json.errors).slice(0, 300)}`);
+      if (data.json?.errors?.length) throw bodyError('Reddit submit', JSON.stringify(data.json.errors));
       return {
         externalUrl: data.json?.data?.url,
         externalId: data.json?.data?.name ?? data.json?.data?.id,
@@ -541,12 +550,12 @@ export const providers: Provider[] = [
         description: content.slice(0, 500),
       };
       if (mediaUrls[0]) body.media_source = { source_type: 'image_url', url: mediaUrls[0] };
-      const res = await fetch('https://api.pinterest.com/v5/pins', {
+      const res = await guardedFetch('https://api.pinterest.com/v5/pins', {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.accessToken}`, 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`Pinterest pin failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Pinterest pin', res);
       const data = (await res.json()) as { id?: string };
       return {
         externalId: data.id,
@@ -567,7 +576,7 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content) {
       if (!creds.apiKey || !creds.publicationId) throw new Error('Hashnode API key and publication ID are required');
-      const res = await fetch('https://gql.hashnode.com', {
+      const res = await guardedFetch('https://gql.hashnode.com', {
         method: 'POST',
         headers: { authorization: creds.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -582,12 +591,12 @@ export const providers: Provider[] = [
           },
         }),
       });
-      if (!res.ok) throw new Error(`Hashnode publish failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Hashnode publish', res);
       const data = (await res.json()) as {
         data?: { publishPost?: { post?: { id?: string; url?: string } } };
         errors?: { message?: string }[];
       };
-      if (data.errors?.length) throw new Error(`Hashnode error: ${data.errors[0].message ?? 'unknown'}`);
+      if (data.errors?.length) throw bodyError('Hashnode publish', data.errors[0].message ?? 'unknown');
       const post = data.data?.publishPost?.post;
       if (!post?.id) throw new Error('Hashnode returned no post');
       return { externalId: post.id, externalUrl: post.url };
@@ -603,13 +612,13 @@ export const providers: Provider[] = [
     fields: [{ key: 'integrationToken', label: 'Integration token', secret: true }],
     async publish(_channel, creds, content) {
       if (!creds.integrationToken) throw new Error('Medium integration token is required');
-      const me = await fetch('https://api.medium.com/v1/me', {
+      const me = await guardedFetch('https://api.medium.com/v1/me', {
         headers: { authorization: `Bearer ${creds.integrationToken}` },
       });
-      if (!me.ok) throw new Error(`Medium auth failed (${me.status}): ${await readError(me)}`);
+      if (!me.ok) throw await httpError('Medium auth', me);
       const userId = ((await me.json()) as { data?: { id?: string } }).data?.id;
       if (!userId) throw new Error('Medium /v1/me returned no user id');
-      const res = await fetch(`https://api.medium.com/v1/users/${userId}/posts`, {
+      const res = await guardedFetch(`https://api.medium.com/v1/users/${userId}/posts`, {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.integrationToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -619,7 +628,7 @@ export const providers: Provider[] = [
           publishStatus: 'public',
         }),
       });
-      if (!res.ok) throw new Error(`Medium publish failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('Medium publish', res);
       const data = (await res.json()) as { data?: { id?: string; url?: string } };
       return { externalId: data.data?.id, externalUrl: data.data?.url };
     },
@@ -642,12 +651,12 @@ export const providers: Provider[] = [
       }
       const site = creds.siteUrl.replace(/\/+$/, '');
       const auth = Buffer.from(`${creds.username}:${creds.applicationPassword}`).toString('base64');
-      const res = await fetch(`${site}/wp-json/wp/v2/posts`, {
+      const res = await guardedFetch(`${site}/wp-json/wp/v2/posts`, {
         method: 'POST',
         headers: { authorization: `Basic ${auth}`, 'content-type': 'application/json' },
         body: JSON.stringify({ title: firstLine(content), content, status: 'publish' }),
       });
-      if (!res.ok) throw new Error(`WordPress publish failed (${res.status}): ${await readError(res)}`);
+      if (!res.ok) throw await httpError('WordPress publish', res);
       const data = (await res.json()) as { id?: number; link?: string };
       return { externalId: data.id ? String(data.id) : undefined, externalUrl: data.link };
     },
