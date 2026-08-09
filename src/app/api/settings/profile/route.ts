@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, publicUser, unauthorized } from '@/lib/auth';
 import { one, query, type User } from '@/lib/db';
 import { assertPublicUrl } from '@/lib/ssrf';
+import { isValidTimezone } from '@/lib/besttime';
 
 interface ProfileBody {
   name?: string;
@@ -19,6 +20,9 @@ export async function POST(req: NextRequest) {
   const name = (body.name ?? user.name).trim();
   const timezone = (body.timezone ?? user.timezone).trim() || 'UTC';
   if (!name) return NextResponse.json({ error: 'Name cannot be empty' }, { status: 400 });
+  if (!isValidTimezone(timezone)) {
+    return NextResponse.json({ error: `Unknown timezone "${timezone}" (use an IANA name like Australia/Sydney)` }, { status: 400 });
+  }
   const signature = body.signature !== undefined ? body.signature.slice(0, 500) : user.signature;
   const signatureEnabled = body.signature_enabled !== undefined ? body.signature_enabled === true : user.signature_enabled;
   let webhookUrl = body.outbound_webhook_url !== undefined ? body.outbound_webhook_url : user.outbound_webhook_url;

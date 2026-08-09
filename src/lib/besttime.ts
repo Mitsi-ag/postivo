@@ -38,6 +38,15 @@ const SLOTS: Record<string, Slot[]> = {
   webhook: [{ days: WEEKDAYS, hours: [9, 10, 11] }],
 };
 
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function tzParts(ts: number, tz: string): { y: number; mo: number; d: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
@@ -69,14 +78,14 @@ function wallToUtc(y: number, mo: number, d: number, h: number, tz: string): Dat
     return Date.UTC(get('year'), get('month') - 1, get('day'), hour, get('minute'), get('second'));
   };
   let ts = guess - (wallAsUtc(guess) - guess);
-  ts = guess - (wallAsUtc(ts) - guess); // refine once for DST edges
+  ts = ts - (wallAsUtc(ts) - guess); // refine once for DST edges
   return new Date(ts);
 }
 
 // Next `count` suggested publish slots (ISO strings) for the given providers,
 // in the user's timezone. Empty providerIds → cross-network defaults.
 export function bestSlots(providerIds: string[], tz: string, count = 3): string[] {
-  const zone = tz || 'UTC';
+  const zone = tz && isValidTimezone(tz) ? tz : 'UTC';
   const slots: Slot[] = [];
   const ids = providerIds.length ? providerIds : ['default'];
   for (const id of ids) {
