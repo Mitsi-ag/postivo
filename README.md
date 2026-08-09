@@ -32,7 +32,8 @@ no Temporal, no worker fleet. Run 1 replica on your laptop or 20 behind a load b
 ```
 
 - **Stateless app tier** — every replica serves the UI, the REST API and an in-process
-  scheduler. Sessions are HMAC-signed cookies (set `JWT_SECRET` so all replicas share it).
+  scheduler. Sessions are HMAC-signed cookies backed by revocable server-side session rows
+  (set `JWT_SECRET` so all replicas share the signing key).
 - **Postgres is the only source of truth** — the scheduler claims due posts atomically with
   `UPDATE … FOR UPDATE SKIP LOCKED`, so N instances racing never publish the same post twice.
 - **S3 for media** when `S3_BUCKET` is set (keys `uploads/<userId>/<id>.<ext>`, owner-checked
@@ -185,6 +186,8 @@ See [.env.example](./.env.example).
 | `DATABASE_URL` | `postgres://postivo:postivo@localhost:5432/postivo` | Postgres connection string (required) |
 | `DATABASE_SSL` | `false` | `true` → `ssl: { rejectUnauthorized: false }` (e.g. RDS) |
 | `JWT_SECRET` | auto-generated into `${DATA_DIR}/jwt_secret` | HMAC secret for session tokens — **set it in multi-instance deploys** |
+| `CREDENTIALS_KEY` | derived from `JWT_SECRET` | 32-byte hex key encrypting channel credentials at rest (AES-256-GCM) — set it in production |
+| `DATABASE_POOL_SIZE` | `5` | Per-instance Postgres pool size (10 App Runner instances × 5 = 50 < RDS max_connections) |
 | `S3_BUCKET` | — | Enables S3 media storage (unset → local disk dev mode) |
 | `AWS_REGION` | `us-east-1` | S3 region |
 | `STRIPE_SECRET_KEY` | — | Enables Stripe billing |
@@ -201,7 +204,7 @@ See [.env.example](./.env.example).
 ## Autoscaling notes
 
 - The app is **stateless**: scale the app tier horizontally behind any load balancer. All
-  shared state lives in Postgres; media in S3; sessions are signed cookies.
+  shared state lives in Postgres; media in S3; sessions are signed cookies backed by server-side session rows.
 - Every replica runs its own 30s scheduler tick. Due posts are claimed with
   `FOR UPDATE SKIP LOCKED`, so a post is published **exactly once** no matter how many
   replicas race. A crashed replica's claims become claimable again after 5 minutes.
@@ -213,16 +216,28 @@ See [.env.example](./.env.example).
 ## Security notes
 
 - Passwords hashed with `crypto.scryptSync` (per-user salt) and verified with `timingSafeEqual`.
-- Sessions are HMAC-SHA256 signed cookies (`httpOnly`, `sameSite=lax`, 30 days).
+- Sessions are HMAC-SHA256 signed cookies (`httpOnly`, `sameSite=lax`, 30 days) carrying a
+  `jti` backed by the `sessions` table — logout, password change and account deletion revoke
+  them server-side, so a stolen cookie dies immediately.
+- Channel credentials are encrypted at rest with AES-256-GCM (`CREDENTIALS_KEY`, falling back
+  to a key derived from `JWT_SECRET`); legacy plaintext rows stay readable and are encrypted
+  on their next write. The owner-only `/api/export` still returns them.
+- Login/register resist account enumeration: generic error wording + a dummy scrypt on
+  unknown emails. `DELETE /api/settings/account` (password re-auth) erases all user data.
 - API keys are stored as SHA-256 hashes; the plaintext is shown exactly once.
 - Media reads are owner-checked and path-traversal safe (strict id validation).
 - Auth endpoints are rate-limited; responses carry `X-Frame-Options`, `X-Content-Type-Options`
   and `Referrer-Policy` security headers.
 - Session cookies are `Secure` when the request arrives over TLS (`x-forwarded-proto: https`).
-- SSRF guard (`src/lib/ssrf.ts`): every user-supplied outbound URL (webhook provider, RSS
-  feeds, media import, outbound webhook) is DNS-resolved and rejected when it points at
-  private/loopback/link-local space (incl. `169.254.169.254`); redirect hops are re-validated.
-  `SSRF_ALLOW_HOSTS` whitelists hosts for local dev/test only.
+- SSRF guard (`src/lib/ssrf.ts`): every server-side outbound fetch goes through
+  `guardedFetch` (all providers, RSS, media import, outbound webhooks) — URLs are DNS-resolved
+  and rejected when they point at private/loopback/link-local space (incl. `169.254.169.254`),
+  and every redirect hop is re-validated. `SSRF_ALLOW_HOSTS` whitelists hosts for local
+  dev/test only. Provider error bodies are logged server-side but never shown to users.
+- External response bodies are read with hard byte caps (RSS 5MB, media import 50MB) and
+  provider publishes time out after 30s.
+- Rate limits key on the LAST `X-Forwarded-For` entry (the proxy-appended client IP), so
+  spoofed headers can't reset buckets.
 - Stripe webhooks are signature-verified against the raw request body.
 
 ## Development
@@ -242,9 +257,9 @@ bash scripts/smoke-phase1.sh # phase-1 feature verification (threads/recurring/R
 # Start a production instance for tests (SSRF_ALLOW_HOSTS lets the local
 # static-file fixtures in smoke-phase1/e2e use localhost URLs):
 PORT=3220 DATABASE_URL=postgres://postivo:postivo@localhost:5432/postivo \
-  SSRF_ALLOW_HOSTS=localhost,127.0.0.1 npm run start
+  SSRF_ALLOW_HOSTS=localhost npm run start
 
-npm run test:e2e             # Playwright suite: 23 tests (e2e + security + mobile), BASE_URL env to override
+npm run test:e2e             # Playwright suite (e2e + security + scenarios + hardening + mobile), BASE_URL env to override
 bash scripts/load.sh         # load test: 20 concurrent users + 500x health (PORT env to override)
 ```
 
