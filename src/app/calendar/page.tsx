@@ -1,10 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
-import { Badge, cardCls, ErrorBanner } from '@/components/ui';
+import { Badge, cardCls, EmptyState, ErrorBanner, inputCls, Skeleton } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
-import type { PostDTO } from '@/lib/types';
+import type { ChannelDTO, PostDTO } from '@/lib/types';
 
 function dayKey(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -18,25 +19,49 @@ const DOT_COLOR: Record<string, string> = {
   draft: 'bg-slate-500',
 };
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 export default function CalendarPage() {
+  const [view, setView] = useState<'month' | 'week'>('month');
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     d.setDate(1);
     return d;
   });
-  const [posts, setPosts] = useState<PostDTO[]>([]);
+  const [posts, setPosts] = useState<PostDTO[] | null>(null);
+  const [channels, setChannels] = useState<ChannelDTO[]>([]);
+  const [channelFilter, setChannelFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<{ posts: PostDTO[] }>('/api/posts')
-      .then((d) => setPosts(d.posts))
+    Promise.all([api<{ posts: PostDTO[] }>('/api/posts'), api<{ channels: ChannelDTO[] }>('/api/channels')])
+      .then(([p, c]) => {
+        setPosts(p.posts);
+        setChannels(c.channels);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load posts'));
   }, []);
 
+  const allTags = useMemo(
+    () => [...new Set((posts ?? []).flatMap((p) => p.tags ?? []))].sort(),
+    [posts],
+  );
+
+  const filtered = useMemo(
+    () =>
+      (posts ?? []).filter((p) => {
+        if (tagFilter && !(p.tags ?? []).includes(tagFilter)) return false;
+        if (channelFilter && !p.targets.some((t) => t.channel_id === channelFilter)) return false;
+        return true;
+      }),
+    [posts, tagFilter, channelFilter],
+  );
+
   const byDay = useMemo(() => {
     const map = new Map<string, PostDTO[]>();
-    for (const p of posts) {
+    for (const p of filtered) {
       const iso = p.scheduled_at ?? p.created_at;
       const key = dayKey(new Date(iso));
       const arr = map.get(key) ?? [];
@@ -44,79 +69,195 @@ export default function CalendarPage() {
       map.set(key, arr);
     }
     return map;
-  }, [posts]);
+  }, [filtered]);
 
+  // Month cells
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (number | null)[] = [
+  const monthCells: (number | null)[] = [
     ...Array<null>(firstWeekday).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
-  while (cells.length % 7 !== 0) cells.push(null);
+  while (monthCells.length % 7 !== 0) monthCells.push(null);
 
-  const monthLabel = cursor.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  // Week cells (Sunday-start week containing cursor)
+  const weekStart = new Date(cursor);
+  weekStart.setDate(cursor.getDate() - cursor.getDay());
+  const weekDates = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    return d;
+  });
+
+  const label =
+    view === 'month'
+      ? cursor.toLocaleString(undefined, { month: 'long', year: 'numeric' })
+      : `${weekDates[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${weekDates[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
   const selectedPosts = selectedDay ? (byDay.get(selectedDay) ?? []) : [];
 
   function shift(delta: number) {
-    setCursor(new Date(year, month + delta, 1));
+    if (view === 'month') {
+      setCursor(new Date(year, month + delta, 1));
+    } else {
+      const d = new Date(cursor);
+      d.setDate(d.getDate() + delta * 7);
+      setCursor(d);
+    }
     setSelectedDay(null);
+  }
+
+  function renderDayCell(key: string, dayNum: number, extraCls = '') {
+    const dayPosts = byDay.get(key) ?? [];
+    const active = selectedDay === key;
+    const isToday = key === dayKey(new Date());
+    return (
+      <button
+        key={key}
+        onClick={() => setSelectedDay(active ? null : key)}
+        aria-label={`${dayPosts.length} posts on ${key}`}
+        className={`min-h-20 rounded-lg border p-1.5 text-left align-top transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
+          active ? 'border-indigo-500 bg-indigo-950/40' : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'
+        } ${extraCls}`}
+      >
+        <span className={`text-xs ${isToday ? 'font-bold text-indigo-300' : 'text-slate-400'}`}>{dayNum}</span>
+        <div className="mt-1 space-y-1">
+          {dayPosts.slice(0, 3).map((p) => (
+            <div key={p.id} className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[p.status] ?? DOT_COLOR.draft}`} />
+              <span className="truncate text-[10px] text-slate-400">{p.content || '(media)'}</span>
+            </div>
+          ))}
+          {dayPosts.length > 3 && <div className="text-[10px] text-slate-500">+{dayPosts.length - 3} more</div>}
+        </div>
+      </button>
+    );
   }
 
   return (
     <Portal title="Calendar">
       <div className="mx-auto max-w-5xl space-y-5">
         <ErrorBanner message={error} />
+
+        {/* Filter bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Filter by channel"
+            value={channelFilter}
+            onChange={(e) => setChannelFilter(e.target.value)}
+            className={`${inputCls} w-auto text-xs`}
+          >
+            <option value="">All channels</option>
+            {channels.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.provider_meta?.icon} {c.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Filter by tag"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className={`${inputCls} w-auto text-xs`}
+          >
+            <option value="">All tags</option>
+            {allTags.map((t) => (
+              <option key={t} value={t}>
+                #{t}
+              </option>
+            ))}
+          </select>
+          {(channelFilter || tagFilter) && (
+            <button
+              onClick={() => {
+                setChannelFilter('');
+                setTagFilter('');
+              }}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              Clear filters
+            </button>
+          )}
+          <div className="ml-auto flex gap-1 rounded-lg border border-slate-800 bg-slate-900/50 p-1" role="group" aria-label="Calendar view">
+            {(['month', 'week'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => {
+                  setView(v);
+                  setSelectedDay(null);
+                }}
+                aria-pressed={view === v}
+                className={`rounded-md px-3 py-1 text-xs capitalize ${
+                  view === v ? 'bg-indigo-600 font-medium text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className={cardCls}>
           <div className="mb-4 flex items-center justify-between">
-            <button onClick={() => shift(-1)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+            <button
+              onClick={() => shift(-1)}
+              aria-label="Previous"
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            >
               ← Prev
             </button>
-            <h2 className="text-lg font-semibold text-white">{monthLabel}</h2>
-            <button onClick={() => shift(1)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-white">{label}</h2>
+              <button
+                onClick={() => {
+                  const d = new Date();
+                  if (view === 'month') d.setDate(1);
+                  setCursor(d);
+                  setSelectedDay(null);
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300"
+              >
+                Today
+              </button>
+            </div>
+            <button
+              onClick={() => shift(1)}
+              aria-label="Next"
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            >
               Next →
             </button>
           </div>
           <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+            {WEEKDAYS.map((d) => (
               <div key={d} className="py-1">
                 {d}
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1">
-            {cells.map((day, i) => {
-              if (day === null) return <div key={i} className="min-h-20 rounded-lg" />;
-              const key = dayKey(new Date(year, month, day));
-              const dayPosts = byDay.get(key) ?? [];
-              const active = selectedDay === key;
-              return (
-                <button
-                  key={i}
-                  onClick={() => setSelectedDay(active ? null : key)}
-                  className={`min-h-20 rounded-lg border p-1.5 text-left align-top transition ${
-                    active
-                      ? 'border-indigo-500 bg-indigo-950/40'
-                      : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'
-                  }`}
-                >
-                  <span className="text-xs text-slate-400">{day}</span>
-                  <div className="mt-1 space-y-1">
-                    {dayPosts.slice(0, 3).map((p) => (
-                      <div key={p.id} className="flex items-center gap-1.5">
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[p.status] ?? DOT_COLOR.draft}`} />
-                        <span className="truncate text-[10px] text-slate-400">{p.content || '(media)'}</span>
-                      </div>
-                    ))}
-                    {dayPosts.length > 3 && (
-                      <div className="text-[10px] text-slate-500">+{dayPosts.length - 3} more</div>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          {posts === null ? (
+            <div className="grid grid-cols-7 gap-1">
+              {Array.from({ length: 35 }, (_, i) => (
+                <Skeleton key={i} className="min-h-20" />
+              ))}
+            </div>
+          ) : view === 'month' ? (
+            <div className="grid grid-cols-7 gap-1">
+              {monthCells.map((day, i) =>
+                day === null ? (
+                  <div key={i} className="min-h-20 rounded-lg" />
+                ) : (
+                  renderDayCell(dayKey(new Date(year, month, day)), day)
+                ),
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-7 gap-1">
+              {weekDates.map((d) => renderDayCell(dayKey(d), d.getDate(), 'min-h-40'))}
+            </div>
+          )}
         </div>
 
         {selectedDay && (
@@ -129,7 +270,7 @@ export default function CalendarPage() {
               })}
             </h3>
             {selectedPosts.length === 0 ? (
-              <p className="text-sm text-slate-500">No posts on this day.</p>
+              <EmptyState icon="🌴" title="No posts on this day" hint="Pick a slot and compose something." />
             ) : (
               <ul className="divide-y divide-slate-800">
                 {selectedPosts.map((p) => (
@@ -139,9 +280,20 @@ export default function CalendarPage() {
                       <p className="mt-1 text-xs text-slate-500">
                         {formatDate(p.scheduled_at ?? p.created_at)} ·{' '}
                         {p.targets.map((t) => t.channel_name ?? t.provider).join(', ') || 'no channels'}
+                        {p.repeat_every_days ? ` · ♻️ every ${p.repeat_every_days}d` : ''}
                       </p>
                     </div>
-                    <Badge status={p.status} />
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge status={p.status} />
+                      {(p.status === 'scheduled' || p.status === 'draft') && (
+                        <Link
+                          href={`/compose?post=${p.id}`}
+                          className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                        >
+                          Edit
+                        </Link>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
