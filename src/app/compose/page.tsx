@@ -3,25 +3,109 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
-import { btnGhost, btnPrimary, ErrorBanner, inputCls, UpgradeBanner } from '@/components/ui';
-import { api, ApiError, toLocalInput } from '@/lib/client';
-import type { ChannelDTO, PostDTO, ProviderMeta } from '@/lib/types';
+import PostPreview from '@/components/PostPreview';
+import { useToast } from '@/components/toast';
+import { btnGhost, btnPrimary, cardCls, ErrorBanner, inputCls, TagChip, UpgradeBanner } from '@/components/ui';
+import { api, ApiError, formatDate, toLocalInput } from '@/lib/client';
+import type { ChannelDTO, ChannelSetDTO, MediaListItemDTO, PostCommentDTO, PostDTO, ProviderMeta, PublicUser } from '@/lib/types';
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
+
+interface MediaLibraryModalProps {
+  onPick: (id: string) => void;
+  onClose: () => void;
+}
+
+function MediaLibraryModal({ onPick, onClose }: MediaLibraryModalProps) {
+  const [items, setItems] = useState<MediaListItemDTO[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ media: MediaListItemDTO[] }>('/api/media-list')
+      .then((d) => setItems(d.media))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load library'));
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Media library"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-semibold text-white">Media library</h3>
+          <button onClick={onClose} aria-label="Close media library" className="text-slate-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+        {error && <ErrorBanner message={error} />}
+        {items === null ? (
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="aspect-square animate-pulse rounded-lg bg-slate-800" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <p className="py-8 text-center text-sm text-slate-500">Your library is empty — upload something first.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+            {items.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => onPick(m.id)}
+                title={m.name}
+                className="group relative aspect-square overflow-hidden rounded-lg border border-slate-700 hover:border-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                {m.mime.startsWith('image/') ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={`/api/media/${m.id}`} alt={m.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center bg-slate-800 text-3xl">🎬</span>
+                )}
+                <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1.5 py-0.5 text-left text-[10px] text-slate-300 opacity-0 group-hover:opacity-100">
+                  {m.name}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ComposeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get('post');
+  const toast = useToast();
 
   const [channels, setChannels] = useState<ChannelDTO[]>([]);
   const [providers, setProviders] = useState<Record<string, ProviderMeta>>({});
+  const [sets, setSets] = useState<ChannelSetDTO[]>([]);
+  const [user, setUser] = useState<PublicUser | null>(null);
   const [content, setContent] = useState('');
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [overrideOpen, setOverrideOpen] = useState<Record<string, boolean>>({});
   const [media, setMedia] = useState<string[]>([]);
   const [when, setWhen] = useState('');
+  const [comments, setComments] = useState<PostCommentDTO[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [repeat, setRepeat] = useState(''); // '' | '7' | '30' | 'custom'
+  const [customDays, setCustomDays] = useState('14');
+  const [bestSlots, setBestSlots] = useState<string[] | null>(null);
+  const [bestBusy, setBestBusy] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [urlImport, setUrlImport] = useState('');
+  const [urlBusy, setUrlBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -34,12 +118,27 @@ function ComposeInner() {
     Promise.all([
       api<{ channels: ChannelDTO[] }>('/api/channels'),
       api<{ providers: ProviderMeta[] }>('/api/providers'),
+      api<{ sets: ChannelSetDTO[] }>('/api/sets'),
+      api<{ user: PublicUser }>('/api/auth/me'),
     ])
-      .then(([c, p]) => {
+      .then(([c, p, s, u]) => {
         setChannels(c.channels);
         setProviders(Object.fromEntries(p.providers.map((m) => [m.id, m])));
+        setSets(s.sets);
+        setUser(u.user);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
+  }, []);
+
+  // Media handed over from /library via sessionStorage.
+  useEffect(() => {
+    const pending = sessionStorage.getItem('postivo:attach');
+    if (pending) {
+      sessionStorage.removeItem('postivo:attach');
+      setMedia((m) => (m.includes(pending) ? m : [...m, pending]));
+      toast.success('Media attached from library');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -49,6 +148,16 @@ function ComposeInner() {
         setContent(post.content);
         setMedia(post.media);
         setWhen(toLocalInput(post.scheduled_at));
+        setComments(post.comments ?? []);
+        setTags(post.tags ?? []);
+        if (post.repeat_every_days) {
+          const r = String(post.repeat_every_days);
+          if (r === '7' || r === '30') setRepeat(r);
+          else {
+            setRepeat('custom');
+            setCustomDays(r);
+          }
+        }
         const sel: Record<string, boolean> = {};
         const ovr: Record<string, string> = {};
         const open: Record<string, boolean> = {};
@@ -77,6 +186,24 @@ function ComposeInner() {
   }, [selectedIds, channels, providers]);
   const overLimit = charLimit !== null && content.length > charLimit;
 
+  const noReplyChannels = useMemo(
+    () =>
+      selectedIds
+        .map((id) => channels.find((c) => c.id === id))
+        .filter((c): c is ChannelDTO => Boolean(c))
+        .filter((c) => !providers[c.provider]?.supportsReply),
+    [selectedIds, channels, providers],
+  );
+
+  const repeatDays = repeat === '' ? null : repeat === 'custom' ? Number(customDays) || null : Number(repeat);
+
+  function addTag(raw: string) {
+    const t = raw.trim().replace(/^#/, '').replace(/,\s*$/, '');
+    if (!t) return;
+    if (!tags.includes(t)) setTags((prev) => [...prev, t].slice(0, 20));
+    setTagInput('');
+  }
+
   async function uploadFiles(files: Iterable<File>) {
     setError(null);
     for (const f of files) {
@@ -87,9 +214,26 @@ function ComposeInner() {
         const data = (await res.json()) as { id?: string; error?: string };
         if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
         setMedia((m) => [...m, data.id as string]);
+        toast.success(`Uploaded ${f.name}`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Upload failed');
+        toast.error(err instanceof Error ? err.message : 'Upload failed');
       }
+    }
+  }
+
+  async function importFromUrl() {
+    const url = urlImport.trim();
+    if (!url) return;
+    setUrlBusy(true);
+    try {
+      const data = await api<{ id: string }>('/api/upload/url', { method: 'POST', json: { url } });
+      setMedia((m) => [...m, data.id]);
+      setUrlImport('');
+      toast.success('Media imported from URL');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setUrlBusy(false);
     }
   }
 
@@ -115,6 +259,47 @@ function ComposeInner() {
     }
   }
 
+  async function fetchBestTime() {
+    setBestBusy(true);
+    try {
+      const q = selectedIds.length ? `?channelIds=${selectedIds.join(',')}` : '';
+      const data = await api<{ slots: string[] }>(`/api/best-time${q}`);
+      setBestSlots(data.slots);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not compute best times');
+    } finally {
+      setBestBusy(false);
+    }
+  }
+
+  function applySet(id: string) {
+    const set = sets.find((s) => s.id === id);
+    if (!set) return;
+    const sel: Record<string, boolean> = {};
+    for (const cid of set.channel_ids) sel[cid] = true;
+    setSelected(sel);
+    toast.success(`Applied set "${set.name}"`);
+  }
+
+  async function saveAsSet() {
+    if (selectedIds.length === 0) {
+      toast.error('Select some channels first');
+      return;
+    }
+    const name = window.prompt('Name for this channel set:');
+    if (!name?.trim()) return;
+    try {
+      const d = await api<{ set: ChannelSetDTO }>('/api/sets', {
+        method: 'POST',
+        json: { name: name.trim(), channelIds: selectedIds },
+      });
+      setSets((s) => [...s, d.set]);
+      toast.success(`Set "${d.set.name}" saved`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save set');
+    }
+  }
+
   async function save(asDraft: boolean) {
     setError(null);
     if (!asDraft) {
@@ -127,6 +312,14 @@ function ComposeInner() {
         return;
       }
     }
+    if (repeatDays && !when) {
+      setError('Recurring posts need a scheduled date and time.');
+      return;
+    }
+    if (repeat === 'custom' && (!Number(customDays) || Number(customDays) < 1 || Number(customDays) > 365)) {
+      setError('Custom repeat must be between 1 and 365 days.');
+      return;
+    }
     setBusy(true);
     const payload = {
       content,
@@ -134,6 +327,9 @@ function ComposeInner() {
       scheduled_at: asDraft ? null : new Date(when).toISOString(),
       channelIds: selectedIds,
       overrides,
+      comments: comments.filter((c) => c.content.trim()),
+      repeat_every_days: repeatDays,
+      tags,
     };
     try {
       if (editId) {
@@ -141,6 +337,7 @@ function ComposeInner() {
       } else {
         await api('/api/posts', { method: 'POST', json: payload });
       }
+      toast.success(asDraft ? 'Draft saved' : editId ? 'Post updated' : 'Post scheduled');
       router.push('/queue');
     } catch (err) {
       if (err instanceof ApiError && err.upgrade) setShowUpgrade(true);
@@ -151,196 +348,468 @@ function ComposeInner() {
 
   return (
     <Portal title={editId ? 'Edit post' : 'Compose'}>
-      <div className="mx-auto max-w-3xl space-y-5">
-        <UpgradeBanner show={showUpgrade} />
-        <ErrorBanner message={error} />
+      <div className="mx-auto max-w-7xl">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+          {/* ── Left: editor ─────────────────────────────────────────── */}
+          <div className="min-w-0 space-y-5">
+            <UpgradeBanner show={showUpgrade} />
+            <ErrorBanner message={error} />
 
-        {/* Content */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-          <div className="mb-2 flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-300">Content</label>
-            <span className={`text-xs ${overLimit ? 'font-semibold text-red-400' : 'text-slate-500'}`}>
-              {content.length}
-              {charLimit !== null ? ` / ${charLimit}` : ''} chars
-            </span>
-          </div>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={6}
-            className={`${inputCls} resize-y`}
-            placeholder="What do you want to share?"
-          />
-          <div className="mt-3 flex items-center gap-3">
-            <button onClick={aiCaption} disabled={aiBusy} className={btnGhost}>
-              {aiBusy ? '✨ Thinking…' : '✨ AI caption'}
-            </button>
-          </div>
-          {suggestions.length > 0 && (
-            <div className="mt-3 space-y-2">
-              <p className="text-xs text-slate-500">Click a suggestion to use it:</p>
-              {suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setContent(s);
-                    setSuggestions([]);
-                  }}
-                  className="block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-left text-sm text-slate-300 hover:border-indigo-600"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Channels */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-          <label className="mb-3 block text-sm font-medium text-slate-300">Channels</label>
-          {channels.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              No channels yet —{' '}
-              <a href="/channels" className="text-indigo-400 hover:text-indigo-300">
-                connect one first
-              </a>
-              .
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {channels.map((c) => {
-                  const meta = providers[c.provider];
-                  const active = !!selected[c.id];
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => setSelected((s) => ({ ...s, [c.id]: !s[c.id] }))}
-                      className={`rounded-full border px-3 py-1.5 text-sm transition ${
-                        active
-                          ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200'
-                          : 'border-slate-700 text-slate-400 hover:border-slate-500'
-                      }`}
-                      title={meta ? `Max ${meta.maxLength} chars` : undefined}
-                    >
-                      {meta?.icon} {c.name}
-                      {meta && <span className="ml-1.5 text-xs opacity-60">{meta.maxLength}</span>}
-                    </button>
-                  );
-                })}
+            {/* Content */}
+            <div className={cardCls}>
+              <div className="mb-2 flex items-center justify-between">
+                <label htmlFor="compose-content" className="text-sm font-medium text-slate-300">
+                  Content
+                </label>
+                <span className={`text-xs ${overLimit ? 'font-semibold text-red-400' : 'text-slate-500'}`}>
+                  {content.length}
+                  {charLimit !== null ? ` / ${charLimit}` : ''} chars
+                </span>
               </div>
-              {selectedIds.map((cid) => {
-                const c = channels.find((ch) => ch.id === cid);
-                if (!c) return null;
-                const meta = providers[c.provider];
-                return (
-                  <div key={cid} className="rounded-lg border border-slate-800">
+              <textarea
+                id="compose-content"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={6}
+                className={`${inputCls} resize-y`}
+                placeholder="What do you want to share?"
+              />
+              <div className="mt-3 flex items-center gap-3">
+                <button onClick={aiCaption} disabled={aiBusy} className={btnGhost}>
+                  {aiBusy ? '✨ Thinking…' : '✨ AI caption'}
+                </button>
+              </div>
+              {suggestions.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-slate-500">Click a suggestion to use it:</p>
+                  {suggestions.map((s, i) => (
                     <button
-                      onClick={() => setOverrideOpen((o) => ({ ...o, [cid]: !o[cid] }))}
-                      className="flex w-full items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-200"
+                      key={i}
+                      onClick={() => {
+                        setContent(s);
+                        setSuggestions([]);
+                      }}
+                      className="block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-left text-sm text-slate-300 hover:border-indigo-600"
                     >
-                      <span>
-                        {meta?.icon} Override content for {c.name}
-                      </span>
-                      <span>{overrideOpen[cid] ? '▲' : '▼'}</span>
+                      {s}
                     </button>
-                    {overrideOpen[cid] && (
-                      <textarea
-                        value={overrides[cid] ?? ''}
-                        onChange={(e) => setOverrides((o) => ({ ...o, [cid]: e.target.value }))}
-                        rows={3}
-                        className={`${inputCls} rounded-t-none border-x-0 border-b-0`}
-                        placeholder={`Custom text for ${c.name} (leave empty to use the main content)`}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        {/* Media */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-          <label className="mb-3 block text-sm font-medium text-slate-300">Media</label>
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(false);
-              void uploadFiles(e.dataTransfer.files);
-            }}
-            onClick={() => fileInput.current?.click()}
-            className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm transition ${
-              dragOver ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300' : 'border-slate-700 text-slate-500 hover:border-slate-500'
-            }`}
-          >
-            Drag & drop images or videos here, or click to browse (max 50MB)
-          </div>
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*,video/*"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) void uploadFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          {media.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-3">
-              {media.map((id) => (
-                <div key={id} className="group relative">
-                  {IMAGE_RE.test(id) ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={`/api/media/${id}`}
-                      alt="upload"
-                      className="h-20 w-20 rounded-lg border border-slate-700 object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-2xl">
-                      🎬
-                    </div>
+            {/* Channels */}
+            <div className={cardCls}>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <label className="text-sm font-medium text-slate-300">Channels</label>
+                <div className="flex items-center gap-2">
+                  {sets.length > 0 && (
+                    <select
+                      aria-label="Apply a channel set"
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (e.target.value) applySet(e.target.value);
+                        e.target.value = '';
+                      }}
+                      className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300 focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="" disabled>
+                        Apply set…
+                      </option>
+                      {sets.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.channel_ids.length})
+                        </option>
+                      ))}
+                    </select>
                   )}
-                  <button
-                    onClick={() => setMedia((m) => m.filter((x) => x !== id))}
-                    className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white group-hover:flex"
-                    title="Remove"
-                  >
-                    ×
+                  <button onClick={() => void saveAsSet()} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                    ★ Save as set
                   </button>
                 </div>
-              ))}
+              </div>
+              {channels.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No channels yet —{' '}
+                  <a href="/channels" className="text-indigo-400 hover:text-indigo-300">
+                    connect one first
+                  </a>
+                  .
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Select channels">
+                    {channels.map((c) => {
+                      const meta = providers[c.provider];
+                      const active = !!selected[c.id];
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => setSelected((s) => ({ ...s, [c.id]: !s[c.id] }))}
+                          aria-pressed={active}
+                          className={`rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
+                            active
+                              ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200'
+                              : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                          }`}
+                          title={meta ? `Max ${meta.maxLength} chars` : undefined}
+                        >
+                          {meta?.icon} {c.name}
+                          {meta && <span className="ml-1.5 text-xs opacity-60">{meta.maxLength}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedIds.map((cid) => {
+                    const c = channels.find((ch) => ch.id === cid);
+                    if (!c) return null;
+                    const meta = providers[c.provider];
+                    return (
+                      <div key={cid} className="rounded-lg border border-slate-800">
+                        <button
+                          onClick={() => setOverrideOpen((o) => ({ ...o, [cid]: !o[cid] }))}
+                          aria-expanded={!!overrideOpen[cid]}
+                          className="flex w-full items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-200"
+                        >
+                          <span>
+                            {meta?.icon} Override content for {c.name}
+                          </span>
+                          <span aria-hidden>{overrideOpen[cid] ? '▲' : '▼'}</span>
+                        </button>
+                        {overrideOpen[cid] && (
+                          <textarea
+                            value={overrides[cid] ?? ''}
+                            onChange={(e) => setOverrides((o) => ({ ...o, [cid]: e.target.value }))}
+                            rows={3}
+                            className={`${inputCls} rounded-t-none border-x-0 border-b-0`}
+                            placeholder={`Custom text for ${c.name} (leave empty to use the main content)`}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        {/* Schedule */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-          <label className="mb-2 block text-sm font-medium text-slate-300">Schedule for</label>
-          <input
-            type="datetime-local"
-            value={when}
-            onChange={(e) => setWhen(e.target.value)}
-            className={`${inputCls} max-w-xs`}
-          />
-        </div>
+            {/* Follow-ups (thread) */}
+            <div className={cardCls}>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-300">Follow-ups</label>
+                <button
+                  onClick={() => setComments((c) => [...c, { content: '', delayMin: 5 }])}
+                  className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                >
+                  ＋ Add follow-up
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-slate-500">
+                Posted as threaded replies after the main post, each delayed by the minutes you set.
+              </p>
+              {comments.length > 0 && noReplyChannels.length > 0 && (
+                <p className="mb-3 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
+                  ⚠️ Follow-ups only post on channels that support replies. Ignored on:{' '}
+                  {noReplyChannels.map((c) => c.name).join(', ')}.
+                </p>
+              )}
+              <div className="space-y-3">
+                {comments.map((c, i) => (
+                  <div key={i} className="rounded-lg border border-slate-800 p-3">
+                    <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                      <span>Reply {i + 1}</span>
+                      <button
+                        onClick={() => setComments((all) => all.filter((_, j) => j !== i))}
+                        aria-label={`Remove follow-up ${i + 1}`}
+                        className="text-slate-500 hover:text-red-300"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <textarea
+                      value={c.content}
+                      onChange={(e) =>
+                        setComments((all) => all.map((x, j) => (j === i ? { ...x, content: e.target.value } : x)))
+                      }
+                      rows={2}
+                      className={inputCls}
+                      placeholder="Follow-up content…"
+                    />
+                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                      Delay
+                      <input
+                        type="number"
+                        min={0}
+                        value={c.delayMin}
+                        onChange={(e) =>
+                          setComments((all) => all.map((x, j) => (j === i ? { ...x, delayMin: Number(e.target.value) } : x)))
+                        }
+                        className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      minutes after previous
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-        <div className="flex justify-end gap-3">
-          <button onClick={() => void save(true)} disabled={busy} className={btnGhost}>
-            Save draft
-          </button>
-          <button onClick={() => void save(false)} disabled={busy} className={btnPrimary}>
-            {busy ? 'Saving…' : editId ? 'Save & schedule' : 'Schedule post'}
-          </button>
+            {/* Media */}
+            <div className={cardCls}>
+              <label className="mb-3 block text-sm font-medium text-slate-300">Media</label>
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  void uploadFiles(e.dataTransfer.files);
+                }}
+                onClick={() => fileInput.current?.click()}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click();
+                }}
+                className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm transition ${
+                  dragOver ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300' : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                }`}
+              >
+                Drag & drop images or videos here, or click to browse (max 50MB)
+              </div>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                className="hidden"
+                aria-label="Upload media files"
+                onChange={(e) => {
+                  if (e.target.files) void uploadFiles(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  value={urlImport}
+                  onChange={(e) => setUrlImport(e.target.value)}
+                  placeholder="https://… import media from URL"
+                  className={`${inputCls} max-w-xs flex-1`}
+                  aria-label="Import media from URL"
+                />
+                <button onClick={() => void importFromUrl()} disabled={urlBusy || !urlImport.trim()} className={btnGhost}>
+                  {urlBusy ? 'Importing…' : 'From URL'}
+                </button>
+                <button onClick={() => setLibraryOpen(true)} className={btnGhost}>
+                  🖼️ Library
+                </button>
+              </div>
+              {media.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {media.map((id) => (
+                    <div key={id} className="group relative">
+                      {IMAGE_RE.test(id) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/media/${id}`}
+                          alt="upload"
+                          className="h-20 w-20 rounded-lg border border-slate-700 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-2xl">
+                          🎬
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setMedia((m) => m.filter((x) => x !== id))}
+                        aria-label="Remove media"
+                        className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white group-hover:flex"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Tags */}
+            <div className={cardCls}>
+              <label htmlFor="tag-input" className="mb-2 block text-sm font-medium text-slate-300">
+                Tags
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {tags.map((t) => (
+                  <TagChip key={t} tag={t} onRemove={() => setTags((all) => all.filter((x) => x !== t))} />
+                ))}
+                <input
+                  id="tag-input"
+                  value={tagInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v.endsWith(',')) addTag(v);
+                    else setTagInput(v);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addTag(tagInput);
+                    } else if (e.key === 'Backspace' && !tagInput && tags.length) {
+                      setTags((all) => all.slice(0, -1));
+                    }
+                  }}
+                  placeholder={tags.length === 0 ? 'Add tags, press Enter…' : ''}
+                  className="min-w-32 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Organize posts and filter them in the queue and calendar.</p>
+            </div>
+
+            {/* Schedule */}
+            <div className={cardCls}>
+              <label htmlFor="schedule-at" className="mb-2 block text-sm font-medium text-slate-300">
+                Schedule for
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="schedule-at"
+                  type="datetime-local"
+                  value={when}
+                  onChange={(e) => {
+                    setWhen(e.target.value);
+                    setBestSlots(null);
+                  }}
+                  className={`${inputCls} max-w-xs`}
+                />
+                <button onClick={() => void fetchBestTime()} disabled={bestBusy} className={btnGhost}>
+                  {bestBusy ? '⏱ Finding…' : '⏱ Best time'}
+                </button>
+              </div>
+              {bestSlots && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {bestSlots.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => {
+                        setWhen(toLocalInput(s));
+                        setBestSlots(null);
+                      }}
+                      className="rounded-full border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs text-indigo-200 hover:border-indigo-500"
+                    >
+                      {formatDate(s)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="repeat" className="mb-1 block text-xs font-medium text-slate-400">
+                    Repeat
+                  </label>
+                  <select
+                    id="repeat"
+                    value={repeat}
+                    onChange={(e) => setRepeat(e.target.value)}
+                    className={`${inputCls} max-w-xs`}
+                  >
+                    <option value="">Does not repeat</option>
+                    <option value="7">Every 7 days</option>
+                    <option value="30">Every 30 days</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  {repeat === 'custom' && (
+                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                      Every
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={customDays}
+                        onChange={(e) => setCustomDays(e.target.value)}
+                        className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      days
+                    </label>
+                  )}
+                </div>
+                {user?.signature_enabled && user.signature && (
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+                    <p className="text-xs font-medium text-slate-400">✍️ Signature appended on publish</p>
+                    <p className="mt-1 truncate text-xs text-slate-500" title={user.signature}>
+                      “{user.signature}”
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button onClick={() => void save(true)} disabled={busy} className={btnGhost}>
+                Save draft
+              </button>
+              <button onClick={() => void save(false)} disabled={busy} className={btnPrimary}>
+                {busy ? 'Saving…' : editId ? 'Save & schedule' : 'Schedule post'}
+              </button>
+            </div>
+          </div>
+
+          {/* ── Right: live previews ─────────────────────────────────── */}
+          <div className="min-w-0">
+            <div className="space-y-4 lg:sticky lg:top-6">
+              <h2 className="text-sm font-medium text-slate-300">Live preview</h2>
+              {selectedIds.length === 0 ? (
+                <div className={`${cardCls} py-10 text-center`}>
+                  <div className="text-3xl" aria-hidden>
+                    👀
+                  </div>
+                  <p className="mt-2 text-sm text-slate-400">Select channels to see per-platform previews.</p>
+                </div>
+              ) : (
+                channels
+                  .filter((c) => selected[c.id])
+                  .map((c) => {
+                    const meta = providers[c.provider] ?? null;
+                    const text = (overrides[c.id] ?? '').trim() || content;
+                    const max = meta?.maxLength;
+                    const over = max !== undefined && text.length > max;
+                    return (
+                      <div key={c.id}>
+                        <div className="mb-1.5 flex items-center justify-between text-xs">
+                          <span className="font-medium text-slate-400">
+                            {meta?.icon} {c.name}
+                            {(overrides[c.id] ?? '').trim() && (
+                              <span className="ml-2 rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+                                override
+                              </span>
+                            )}
+                          </span>
+                          <span className={over ? 'font-semibold text-red-400' : 'text-slate-500'}>
+                            {text.length}
+                            {max !== undefined ? ` / ${max}` : ''}
+                          </span>
+                        </div>
+                        <PostPreview meta={meta} channelName={c.name} content={text} media={media} />
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
         </div>
       </div>
+
+      {libraryOpen && (
+        <MediaLibraryModal
+          onClose={() => setLibraryOpen(false)}
+          onPick={(id) => {
+            setMedia((m) => (m.includes(id) ? m : [...m, id]));
+            setLibraryOpen(false);
+            toast.success('Media attached');
+          }}
+        />
+      )}
     </Portal>
   );
 }
