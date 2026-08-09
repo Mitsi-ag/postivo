@@ -5,14 +5,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   let db = false;
-  let dbError: string | null = null;
   try {
     await one('SELECT 1');
     db = true;
-  } catch (e) {
-    dbError = e instanceof Error ? e.message : String(e);
+  } catch {
+    // Deliberately swallowed — never leak driver/internal error details.
   }
   // Always 200: platform health checks (App Runner) only prove the process is
-  // up. The db flag/error surfaces connectivity problems for monitoring.
-  return NextResponse.json({ ok: true, db, dbError, version: '1.0.0' });
+  // up. The db flag surfaces connectivity problems for monitoring.
+  return NextResponse.json({ ok: true, db });
 }
