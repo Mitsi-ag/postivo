@@ -43,7 +43,13 @@ export async function POST(req: NextRequest) {
     (file.name.includes('.') ? (file.name.split('.').pop() ?? 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') : 'bin');
   const id = `${crypto.randomUUID()}.${ext || 'bin'}`;
   await putMedia(user.id, id, file.type, buffer);
-  await query('INSERT INTO media (id, user_id, mime) VALUES ($1,$2,$3)', [id, user.id, file.type]);
+  await query('INSERT INTO media (id, user_id, mime, name, size) VALUES ($1,$2,$3,$4,$5)', [
+    id,
+    user.id,
+    file.type,
+    (file.name || id).slice(0, 300),
+    buffer.byteLength,
+  ]);
 
   return NextResponse.json({ id, url: `/api/media/${id}` }, { status: 201 });
 }

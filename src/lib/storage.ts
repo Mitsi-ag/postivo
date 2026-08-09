@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { DATA_DIR } from './db';
 
 // Media storage: S3 in production (S3_BUCKET set), local disk in dev.
@@ -29,6 +29,14 @@ export async function putMedia(userId: string, id: string, mime: string, data: B
   await s3().send(
     new PutObjectCommand({ Bucket: BUCKET, Key: `uploads/${userId}/${id}`, Body: data, ContentType: mime }),
   );
+}
+
+export async function deleteMedia(userId: string, id: string): Promise<void> {
+  if (!s3Enabled()) {
+    fs.rmSync(path.join(DATA_DIR, 'uploads', id), { force: true });
+    return;
+  }
+  await s3().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: `uploads/${userId}/${id}` }));
 }
 
 export interface MediaObject {

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { one, type MediaItem } from '@/lib/db';
-import { getMedia } from '@/lib/storage';
+import { getMedia, deleteMedia } from '@/lib/storage';
+import { query } from '@/lib/db';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,4 +25,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       'cache-control': 'private, max-age=31536000, immutable',
     },
   });
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!/^[A-Za-z0-9-]+\.[a-z0-9]+$/.test(id)) {
+    return NextResponse.json({ error: 'Invalid media id' }, { status: 400 });
+  }
+  const user = await getSessionUser(req);
+  if (!user) return unauthorized();
+  const item = await one<MediaItem>('SELECT * FROM media WHERE id = $1', [id]);
+  if (!item || item.user_id !== user.id) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  await deleteMedia(user.id, id).catch(() => {}); // row removal is the source of truth
+  await query('DELETE FROM media WHERE id = $1', [id]);
+  return NextResponse.json({ ok: true });
 }

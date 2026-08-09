@@ -6,7 +6,8 @@ export async function GET(req: NextRequest) {
   const user = await getSessionUser(req);
   if (!user) return unauthorized();
   const status = req.nextUrl.searchParams.get('status') ?? undefined;
-  return NextResponse.json({ posts: await listPosts(user.id, status) });
+  const tag = req.nextUrl.searchParams.get('tag') ?? undefined;
+  return NextResponse.json({ posts: await listPosts(user.id, { status, tag }) });
 }
 
 export async function POST(req: NextRequest) {

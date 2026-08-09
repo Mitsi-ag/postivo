@@ -62,8 +62,25 @@ export async function GET(req: NextRequest) {
     [user.id],
   );
 
+  // Aggregated engagement stats collected by /api/analytics/refresh.
+  const statRows = await query<{ stats: Record<string, number> }>(
+    `SELECT t.stats FROM post_targets t JOIN posts p ON p.id = t.post_id
+     WHERE p.user_id = $1 AND t.status = 'published' AND t.stats <> '{}'::jsonb`,
+    [user.id],
+  );
+  const engagement = { likes: 0, reposts: 0, replies: 0, views: 0, comments: 0 };
+  for (const r of statRows) {
+    const s = r.stats ?? {};
+    engagement.likes += s.likes ?? 0;
+    engagement.reposts += s.reposts ?? 0;
+    engagement.replies += s.replies ?? 0;
+    engagement.views += s.views ?? 0;
+    engagement.comments += s.comments ?? 0;
+  }
+
   const payload: AnalyticsDTO = {
     totals: { channels, scheduled, publishedThisWeek, failed },
+    engagement,
     byProvider,
     last14Days,
     recentLog,

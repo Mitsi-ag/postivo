@@ -8,8 +8,15 @@ import { createPost, listPosts, type PostInput } from '@/lib/core';
 export async function GET(req: NextRequest) {
   const user = await authByApiKey(req);
   if (!user) return unauthorized();
-  const status = req.nextUrl.searchParams.get('status') ?? undefined;
-  return NextResponse.json({ posts: await listPosts(user.id, status) });
+  const sp = req.nextUrl.searchParams;
+  return NextResponse.json({
+    posts: await listPosts(user.id, {
+      status: sp.get('status') ?? undefined,
+      tag: sp.get('tag') ?? undefined,
+      start: sp.get('start') ?? undefined,
+      end: sp.get('end') ?? undefined,
+    }),
+  });
 }
 
 export async function POST(req: NextRequest) {

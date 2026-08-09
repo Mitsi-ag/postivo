@@ -15,5 +15,6 @@ export async function GET(req: NextRequest) {
   const tab = req.nextUrl.searchParams.get('tab') ?? 'scheduled';
   const status = TABS[tab];
   if (!status) return NextResponse.json({ error: `Unknown tab "${tab}"` }, { status: 400 });
-  return NextResponse.json({ posts: await listPosts(user.id, status) });
+  const tag = req.nextUrl.searchParams.get('tag') ?? undefined;
+  return NextResponse.json({ posts: await listPosts(user.id, { status, tag }) });
 }
