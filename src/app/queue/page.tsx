@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Portal from '@/components/Portal';
 import { Badge, btnDanger, btnGhost, cardCls, ErrorBanner } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
@@ -14,9 +14,13 @@ const TABS = [
   { key: 'drafts', label: 'Drafts' },
 ] as const;
 
-export default function QueuePage() {
+function QueueInner() {
   const router = useRouter();
-  const [tab, setTab] = useState<string>('scheduled');
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab');
+  const [tab, setTab] = useState<string>(
+    initialTab && (TABS as readonly { key: string }[]).some((t) => t.key === initialTab) ? initialTab : 'scheduled',
+  );
   const [posts, setPosts] = useState<PostDTO[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,5 +153,17 @@ export default function QueuePage() {
         )}
       </div>
     </Portal>
+  );
+}
+
+export default function QueuePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading…</div>
+      }
+    >
+      <QueueInner />
+    </Suspense>
   );
 }
