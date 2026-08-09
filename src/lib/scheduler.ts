@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { one, query, type Channel, type Post, type PostComment, type PostTarget, type RssFeed, type TargetComment, type User } from './db';
 import { getProvider } from './providers/registry';
+import { decryptChannelCredentials } from './crypto';
 import { generateCaption } from './ai';
 import { createPost } from './core';
 import { postsThisMonth, planOf } from './plans';
@@ -135,7 +136,7 @@ async function processTarget(row: DueRow): Promise<void> {
     if (!provider) throw new Error(`Unknown provider "${channel.provider}"`);
     if (channel.status !== 'active') throw new Error(`Channel "${channel.name}" is not active (${channel.status})`);
     const content = withSignature(row.content_override ?? row.content, provider.maxLength, row.signature, row.signature_enabled);
-    const creds = channel.credentials ?? {};
+    const creds = decryptChannelCredentials(channel);
     const result = await provider.publish(channel, creds, content, mediaUrls, {
       postId: row.post_id,
       scheduledAt: row.scheduled_at,
@@ -285,12 +286,13 @@ async function processComment(row: DueComment): Promise<void> {
     if (!provider) throw new Error(`Unknown provider "${channel.provider}"`);
     if (channel.status !== 'active') throw new Error(`Channel "${channel.name}" is not active (${channel.status})`);
     const content = row.content;
+    const creds = decryptChannelCredentials(channel);
     let result;
     if (provider.reply && row.external_id_target) {
-      result = await provider.reply(channel, row.external_id_target, content);
+      result = await provider.reply({ ...channel, credentials: creds }, row.external_id_target, content);
     } else {
       // Provider can't thread replies — post as a standalone message instead.
-      result = await provider.publish(channel, channel.credentials ?? {}, content, [], {
+      result = await provider.publish(channel, creds, content, [], {
         postId: row.post_id,
         scheduledAt: row.publish_at,
       });

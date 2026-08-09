@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { query, type Channel, type PostTarget } from '@/lib/db';
 import { getProvider } from '@/lib/providers/registry';
+import { decryptChannelCredentials } from '@/lib/crypto';
 import { rateLimit } from '@/lib/ratelimit';
 
 interface TargetWithChannel extends PostTarget {
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     const provider = getProvider(t.provider);
     if (!provider?.stats) continue;
     try {
-      const channel = { id: t.channel_id, credentials: t.credentials ?? {} } as Channel;
+      const channel = { id: t.channel_id, credentials: decryptChannelCredentials({ credentials: t.credentials }) } as Channel;
       const stats = await provider.stats(channel, t.external_id as string);
       if (stats) {
         await query('UPDATE post_targets SET stats = $1 WHERE id = $2', [JSON.stringify(stats), t.id]);

@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, publicUser, unauthorized } from '@/lib/auth';
+import { decryptChannelCredentials } from '@/lib/crypto';
 import { query, type ApiKey, type Channel, type Post, type PostTarget } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser(req);
   if (!user) return unauthorized();
 
+  // Owner-only export of their own data — credentials are decrypted here just
+  // like they are presented to providers at publish time.
   const channels = (await query<Channel>('SELECT * FROM channels WHERE user_id = $1', [user.id])).map((c) => ({
     ...c,
-    credentials: c.credentials ?? {},
+    credentials: decryptChannelCredentials(c),
   }));
   const posts = [];
   for (const p of await query<Post>('SELECT * FROM posts WHERE user_id = $1', [user.id])) {

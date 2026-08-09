@@ -293,7 +293,7 @@ test('session: expired or tampered cookie → 401; valid signed cookie → 200',
   };
   // A valid token needs a live server-side session row backing its jti.
   const jti = crypto.randomUUID();
-  await dbQuery('INSERT INTO sessions (jti, user_id, expires_at) VALUES ($1,$2, now() + interval '1 day')', [jti, uid]);
+  await dbQuery("INSERT INTO sessions (jti, user_id, expires_at) VALUES ($1,$2, now() + interval '1 day')", [jti, uid]);
   const expired = craft(Date.now() - 1000, crypto.randomUUID());
   const noRow = craft(Date.now() + 86_400_000, crypto.randomUUID()); // valid HMAC, no session row
   const valid = craft(Date.now() + 86_400_000, jti);

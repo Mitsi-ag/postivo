@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { one, query, type Channel, type Post, type PostComment, type PostTarget, type User } from './db';
 import { getProvider, providerMetaFor } from './providers/registry';
+import { decryptChannelCredentials, encryptJson } from './crypto';
 import { channelsUsed, planOf, postsThisMonth } from './plans';
 import type { ChannelDTO, PostDTO, TargetDTO } from './types';
 
@@ -49,7 +50,7 @@ export async function createChannel(
   const name = (body.name ?? '').trim() || provider.name;
   await query(
     'INSERT INTO channels (id, user_id, provider, name, credentials, status) VALUES ($1,$2,$3,$4,$5,$6)',
-    [id, user.id, provider.id, name, JSON.stringify(creds), 'active'],
+    [id, user.id, provider.id, name, JSON.stringify(encryptJson(creds)), 'active'],
   );
   const channel = (await listChannelsDTO(user.id)).find((c) => c.id === id);
   return { channel };
