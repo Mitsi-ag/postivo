@@ -173,7 +173,7 @@ test('rate limiting: 11th login attempt in 5 min → 429', async () => {
 test('rate limiting: spoofed leftmost X-Forwarded-For does not bypass the bucket', async () => {
   // The limiter must key on the LAST XFF entry (proxy-appended client IP), so
   // prepending a fresh fake IP per request must not reset the bucket.
-  const realIp = `203.0.113.${((parseInt(RUN.replace(/[^a-z0-9]/g, ''), 36) + 100) % 250) + 1}`;
+  const realIp = `203.0.113.${((parseInt(RUN.replace(/[^a-z0-9]/g, ''), 36) % 250) + 7) % 250 + 1}`;
   const ctx = await request.newContext();
   let lastStatus = 0;
   for (let i = 1; i <= 11; i++) {

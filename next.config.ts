@@ -18,6 +18,13 @@ const CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 
+const SECURITY_HEADERS = [
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+];
+
 const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
@@ -25,14 +32,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: '/(.*)',
-        headers: [
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
-          { key: 'Content-Security-Policy', value: CSP },
-        ],
+        // Media responses set their own CSP (SVG sandbox is stricter) — the
+        // global CSP must not clobber it.
+        source: '/((?!api/media).*)',
+        headers: [...SECURITY_HEADERS, { key: 'Content-Security-Policy', value: CSP }],
+      },
+      {
+        source: '/api/media/:path*',
+        headers: SECURITY_HEADERS,
       },
     ];
   },
