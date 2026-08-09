@@ -195,6 +195,7 @@ See [.env.example](./.env.example).
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Any OpenAI-compatible endpoint |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Caption model |
 | `DATA_DIR` | `./data` | Local-disk uploads (dev) + generated secret |
+| `SSRF_ALLOW_HOSTS` | — | Hostname allowlist that bypasses the SSRF guard (local dev/test only — never in production) |
 | `PORT` | `3000` | Server port |
 
 ## Autoscaling notes
@@ -217,6 +218,11 @@ See [.env.example](./.env.example).
 - Media reads are owner-checked and path-traversal safe (strict id validation).
 - Auth endpoints are rate-limited; responses carry `X-Frame-Options`, `X-Content-Type-Options`
   and `Referrer-Policy` security headers.
+- Session cookies are `Secure` when the request arrives over TLS (`x-forwarded-proto: https`).
+- SSRF guard (`src/lib/ssrf.ts`): every user-supplied outbound URL (webhook provider, RSS
+  feeds, media import, outbound webhook) is DNS-resolved and rejected when it points at
+  private/loopback/link-local space (incl. `169.254.169.254`); redirect hops are re-validated.
+  `SSRF_ALLOW_HOSTS` whitelists hosts for local dev/test only.
 - Stripe webhooks are signature-verified against the raw request body.
 
 ## Development
@@ -227,7 +233,22 @@ npm run dev                  # dev server
 npm run build                # production build (standalone output)
 npm run start                # production server
 bash scripts/smoke.sh        # end-to-end smoke test against a running server (PORT env to override)
+bash scripts/smoke-phase1.sh # phase-1 feature verification (threads/recurring/RSS/sets/uploads/v1 API)
 ```
+
+## Testing
+
+```bash
+# Start a production instance for tests (SSRF_ALLOW_HOSTS lets the local
+# static-file fixtures in smoke-phase1/e2e use localhost URLs):
+PORT=3220 DATABASE_URL=postgres://postivo:postivo@localhost:5432/postivo \
+  SSRF_ALLOW_HOSTS=localhost,127.0.0.1 npm run start
+
+npm run test:e2e             # Playwright suite: 23 tests (e2e + security + mobile), BASE_URL env to override
+bash scripts/load.sh         # load test: 20 concurrent users + 500x health (PORT env to override)
+```
+
+Never set `SSRF_ALLOW_HOSTS` in production.
 
 ## License
 
