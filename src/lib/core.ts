@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { one, query, type Channel, type Post, type PostTarget, type User } from './db';
+import { one, query, type Channel, type Post, type PostComment, type PostTarget, type User } from './db';
 import { getProvider, providerMetaFor } from './providers/registry';
 import { channelsUsed, planOf, postsThisMonth } from './plans';
 import type { ChannelDTO, PostDTO, TargetDTO } from './types';
@@ -80,6 +80,8 @@ export async function serializePost(post: Post): Promise<PostDTO> {
     retry_count: r.retry_count,
     next_retry_at: r.next_retry_at,
     external_url: r.external_url,
+    external_id: r.external_id,
+    stats: r.stats ?? {},
     content_override: r.content_override,
   }));
   return {
@@ -88,6 +90,9 @@ export async function serializePost(post: Post): Promise<PostDTO> {
     media: Array.isArray(post.media) ? post.media : [],
     scheduled_at: post.scheduled_at,
     status: post.status,
+    comments: Array.isArray(post.comments) ? post.comments : [],
+    repeat_every_days: post.repeat_every_days ?? null,
+    tags: Array.isArray(post.tags) ? post.tags : [],
     created_at: post.created_at,
     updated_at: post.updated_at,
     targets,
@@ -99,20 +104,47 @@ export async function getPostDTO(postId: string, userId: string): Promise<PostDT
   return post ? serializePost(post) : null;
 }
 
-export async function listPosts(userId: string, status?: string): Promise<PostDTO[]> {
+export interface ListPostsOptions {
+  status?: string;
+  tag?: string;
+  start?: string; // ISO — filters scheduled_at >= start
+  end?: string; // ISO — filters scheduled_at <= end
+}
+
+export async function listPosts(userId: string, statusOrOpts?: string | ListPostsOptions): Promise<PostDTO[]> {
+  const opts: ListPostsOptions = typeof statusOrOpts === 'string' ? { status: statusOrOpts } : (statusOrOpts ?? {});
+  const { status, tag, start, end } = opts;
+  const conds: string[] = ['p.user_id = $1'];
+  const params: (string | null)[] = [userId];
+  if (status && status !== 'failed') {
+    params.push(status);
+    conds.push(`p.status = $${params.length}`);
+  }
+  if (tag) {
+    params.push(JSON.stringify([tag]));
+    conds.push(`p.tags @> $${params.length}::jsonb`);
+  }
+  if (start && !Number.isNaN(Date.parse(start))) {
+    params.push(start);
+    conds.push(`p.scheduled_at >= $${params.length}`);
+  }
+  if (end && !Number.isNaN(Date.parse(end))) {
+    params.push(end);
+    conds.push(`p.scheduled_at <= $${params.length}`);
+  }
+  const where = conds.join(' AND ');
   let posts: Post[];
   if (status === 'failed') {
     posts = await query<Post>(
-      `SELECT * FROM posts p WHERE p.user_id = $1 AND (
+      `SELECT * FROM posts p WHERE ${where} AND (
          p.status = 'failed' OR EXISTS (SELECT 1 FROM post_targets t WHERE t.post_id = p.id AND t.status = 'failed')
        ) ORDER BY p.updated_at DESC LIMIT 200`,
-      [userId],
+      params,
     );
-  } else if (status) {
-    const order = status === 'scheduled' ? 'p.scheduled_at ASC' : 'p.created_at DESC';
-    posts = await query<Post>(`SELECT * FROM posts p WHERE p.user_id = $1 AND p.status = $2 ORDER BY ${order} LIMIT 200`, [userId, status]);
   } else {
-    posts = await query<Post>('SELECT * FROM posts p WHERE p.user_id = $1 ORDER BY p.created_at DESC LIMIT 500', [userId]);
+    const order = status === 'scheduled' ? 'p.scheduled_at ASC' : 'p.created_at DESC';
+    const limit = status ? 200 : 500;
+    posts = await query<Post>(`SELECT * FROM posts p WHERE ${where} ORDER BY ${order} LIMIT ${limit}`, params);
   }
   return Promise.all(posts.map(serializePost));
 }
@@ -123,6 +155,41 @@ export interface PostInput {
   scheduled_at?: string | null;
   channelIds?: string[];
   overrides?: Record<string, string>;
+  comments?: PostComment[];
+  repeat_every_days?: number | null;
+  tags?: string[];
+}
+
+function parseComments(raw: unknown): PostComment[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) return null;
+  const out: PostComment[] = [];
+  for (const c of raw) {
+    const content = typeof (c as PostComment)?.content === 'string' ? (c as PostComment).content.trim() : '';
+    const delayMin = Number((c as PostComment)?.delayMin);
+    if (!content || !Number.isFinite(delayMin) || delayMin < 0) return null;
+    out.push({ content, delayMin: Math.floor(delayMin) });
+  }
+  return out.slice(0, 20);
+}
+
+function parseTags(raw: unknown): string[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const t of raw) {
+    if (typeof t !== 'string') return null;
+    const tag = t.trim().replace(/^#/, '');
+    if (tag) out.push(tag);
+  }
+  return [...new Set(out)].slice(0, 20);
+}
+
+function parseRepeat(raw: unknown): number | null | undefined {
+  if (raw === undefined || raw === null) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 365) return undefined;
+  return n;
 }
 
 async function validChannelIds(userId: string, channelIds: string[]): Promise<string[]> {
@@ -142,6 +209,13 @@ export async function createPost(
   const media = Array.isArray(body.media) ? body.media : [];
   const scheduledAt = body.scheduled_at ?? null;
   const channelIds = await validChannelIds(user.id, body.channelIds ?? []);
+  const comments = parseComments(body.comments);
+  if (!comments) return { error: 'comments must be an array of {content, delayMin>=0}', status: 400 };
+  const tags = parseTags(body.tags);
+  if (!tags) return { error: 'tags must be an array of strings', status: 400 };
+  const repeat = parseRepeat(body.repeat_every_days);
+  if (repeat === undefined) return { error: 'repeat_every_days must be an integer between 1 and 365', status: 400 };
+  if (repeat && !scheduledAt) return { error: 'repeat_every_days requires a scheduled post', status: 400 };
 
   if (!content && media.length === 0) return { error: 'Content is required', status: 400 };
   if (scheduledAt && channelIds.length === 0) return { error: 'Select at least one channel to schedule', status: 400 };
@@ -162,8 +236,8 @@ export async function createPost(
   const id = crypto.randomUUID();
   const status = scheduledAt ? 'scheduled' : 'draft';
   await query(
-    'INSERT INTO posts (id, user_id, content, media, scheduled_at, status) VALUES ($1,$2,$3,$4,$5,$6)',
-    [id, user.id, content, JSON.stringify(media), scheduledAt, status],
+    'INSERT INTO posts (id, user_id, content, media, scheduled_at, status, comments, repeat_every_days, tags) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [id, user.id, content, JSON.stringify(media), scheduledAt, status, JSON.stringify(comments), repeat, JSON.stringify(tags)],
   );
   for (const cid of channelIds) {
     await query(
@@ -242,6 +316,7 @@ export async function deletePost(userId: string, postId: string): Promise<boolea
   const existing = await one<Post>('SELECT * FROM posts WHERE id = $1 AND user_id = $2', [postId, userId]);
   if (!existing) return false;
   await query('DELETE FROM publish_log WHERE target_id IN (SELECT id FROM post_targets WHERE post_id = $1)', [postId]);
+  await query('DELETE FROM post_targets_comments WHERE target_id IN (SELECT id FROM post_targets WHERE post_id = $1)', [postId]);
   await query('DELETE FROM post_targets WHERE post_id = $1', [postId]);
   await query('DELETE FROM posts WHERE id = $1', [postId]);
   return true;
