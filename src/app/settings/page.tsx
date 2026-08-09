@@ -28,6 +28,9 @@ export default function SettingsPage() {
   const [keyName, setKeyName] = useState('');
   const [createdKey, setCreatedKey] = useState<CreatedKey | null>(null);
 
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,6 +112,22 @@ export default function SettingsPage() {
     a.download = `postivo-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  async function deleteAccount(e: React.FormEvent) {
+    e.preventDefault();
+    if (!window.confirm('Permanently delete your account and ALL data (posts, channels, media)? This cannot be undone.')) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await api('/api/settings/account', { method: 'DELETE', json: { password: deletePassword } });
+      window.location.href = '/login';
+    } catch (err) {
+      setDeleting(false);
+      setError(err instanceof Error ? err.message : 'Account deletion failed');
+    }
   }
 
   return (
@@ -233,6 +252,28 @@ export default function SettingsPage() {
             Download export
           </button>
         </div>
+
+        <form onSubmit={deleteAccount} className={`${cardCls} space-y-3 border-red-900/60`}>
+          <h2 className="font-semibold text-red-400">Danger zone</h2>
+          <p className="text-xs text-slate-500">
+            Permanently delete your account and everything attached to it — posts, channels, scheduled content,
+            media, RSS feeds and API keys. Confirm with your password.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-400">Password</label>
+            <input
+              type="password"
+              required
+              autoComplete="current-password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+          <button type="submit" disabled={deleting} className={btnDanger}>
+            {deleting ? 'Deleting…' : 'Delete account'}
+          </button>
+        </form>
       </div>
     </Portal>
   );

@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, publicUser, unauthorized } from '@/lib/auth';
 import { decryptChannelCredentials } from '@/lib/crypto';
-import { query, type ApiKey, type Channel, type Post, type PostTarget } from '@/lib/db';
+import {
+  query,
+  type ApiKey,
+  type Channel,
+  type ChannelSet,
+  type MediaItem,
+  type Post,
+  type PostTarget,
+  type RssFeed,
+  type TargetComment,
+} from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser(req);
@@ -15,10 +25,20 @@ export async function GET(req: NextRequest) {
   }));
   const posts = [];
   for (const p of await query<Post>('SELECT * FROM posts WHERE user_id = $1', [user.id])) {
+    const targets = [];
+    for (const t of await query<PostTarget>('SELECT t.* FROM post_targets t WHERE t.post_id = $1', [p.id])) {
+      targets.push({
+        ...t,
+        comments: await query<TargetComment>(
+          'SELECT * FROM post_targets_comments WHERE target_id = $1 ORDER BY idx ASC',
+          [t.id],
+        ),
+      });
+    }
     posts.push({
       ...p,
       media: Array.isArray(p.media) ? p.media : [],
-      targets: await query<PostTarget>('SELECT t.* FROM post_targets t WHERE t.post_id = $1', [p.id]),
+      targets,
     });
   }
   const apiKeys = (await query<ApiKey>('SELECT * FROM api_keys WHERE user_id = $1', [user.id])).map((k) => ({
@@ -35,6 +55,9 @@ export async function GET(req: NextRequest) {
     api_keys: apiKeys,
     channels,
     posts,
+    rss_feeds: await query<RssFeed>('SELECT * FROM rss_feeds WHERE user_id = $1', [user.id]),
+    sets: await query<ChannelSet>('SELECT * FROM sets WHERE user_id = $1', [user.id]),
+    media: await query<MediaItem>('SELECT * FROM media WHERE user_id = $1', [user.id]),
   };
 
   const date = new Date().toISOString().slice(0, 10);
