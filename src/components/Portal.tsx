@@ -65,8 +65,11 @@ export default function Portal({ title, children }: { title: string; children: R
           <h1 className="shrink-0 text-lg font-semibold text-white">{title}</h1>
           <div className="flex min-w-0 items-center gap-3 text-sm">
             <span className="truncate text-slate-400">
-              {user.name} <span className="text-slate-600">·</span>{' '}
-              <span className="hidden sm:inline">{user.email}</span>
+              {user.name}
+              <span className="hidden sm:inline">
+                {' '}
+                <span className="text-slate-600">·</span> {user.email}
+              </span>
             </span>
             <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
               Log out
