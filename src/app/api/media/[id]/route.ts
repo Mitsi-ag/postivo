@@ -19,12 +19,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   const obj = await getMedia(user.id, id);
   if (!obj) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return new NextResponse(new Uint8Array(obj.body), {
-    headers: {
-      'content-type': obj.contentType || item.mime || 'application/octet-stream',
-      'cache-control': 'private, max-age=31536000, immutable',
-    },
-  });
+  const headers: Record<string, string> = {
+    'content-type': obj.contentType || item.mime || 'application/octet-stream',
+    'cache-control': 'private, max-age=31536000, immutable',
+  };
+  // User-supplied SVG can carry <script> — sandbox it so it renders as an
+  // image but can never execute in this origin (stored-XSS guard).
+  if ((item.mime || obj.contentType) === 'image/svg+xml' || id.endsWith('.svg')) {
+    headers['content-security-policy'] = 'sandbox';
+  }
+  return new NextResponse(new Uint8Array(obj.body), { headers });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

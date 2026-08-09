@@ -8,13 +8,21 @@ export async function POST(req: NextRequest) {
   if (!billingEnabled()) {
     return NextResponse.json({ error: 'billing_not_configured' }, { status: 503 });
   }
-  const session = await getStripe().checkout.sessions.create({
-    mode: 'subscription',
-    line_items: [{ price: process.env.STRIPE_PRICE_PRO!, quantity: 1 }],
-    customer_email: user.email,
-    metadata: { user_id: user.id },
-    success_url: `${appUrl()}/settings/billing?upgraded=1`,
-    cancel_url: `${appUrl()}/settings/billing`,
-  });
-  return NextResponse.json({ url: session.url });
+  if (user.plan === 'pro') {
+    return NextResponse.json({ error: 'already_pro', message: 'You are already on the Pro plan — use the billing portal to manage your subscription.' }, { status: 409 });
+  }
+  try {
+    const session = await getStripe().checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: process.env.STRIPE_PRICE_PRO!, quantity: 1 }],
+      customer_email: user.email,
+      metadata: { user_id: user.id },
+      success_url: `${appUrl()}/settings/billing?upgraded=1`,
+      cancel_url: `${appUrl()}/settings/billing`,
+    });
+    return NextResponse.json({ url: session.url });
+  } catch (err) {
+    console.error('[postivo] stripe checkout failed:', err);
+    return NextResponse.json({ error: 'checkout_failed', message: 'Could not create a checkout session — please try again later.' }, { status: 502 });
+  }
 }

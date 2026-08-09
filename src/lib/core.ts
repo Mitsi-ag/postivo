@@ -165,7 +165,7 @@ function parseComments(raw: unknown): PostComment[] | null {
   if (!Array.isArray(raw)) return null;
   const out: PostComment[] = [];
   for (const c of raw) {
-    const content = typeof (c as PostComment)?.content === 'string' ? (c as PostComment).content.trim() : '';
+    const content = typeof (c as PostComment)?.content === 'string' ? cleanText((c as PostComment).content).trim() : '';
     const delayMin = Number((c as PostComment)?.delayMin);
     if (!content || !Number.isFinite(delayMin) || delayMin < 0) return null;
     out.push({ content, delayMin: Math.floor(delayMin) });
@@ -179,7 +179,7 @@ function parseTags(raw: unknown): string[] | null {
   const out: string[] = [];
   for (const t of raw) {
     if (typeof t !== 'string') return null;
-    const tag = t.trim().replace(/^#/, '');
+    const tag = cleanText(t).trim().replace(/^#/, '');
     if (tag) out.push(tag);
   }
   return [...new Set(out)].slice(0, 20);
@@ -201,12 +201,30 @@ async function validChannelIds(userId: string, channelIds: string[]): Promise<st
   return out;
 }
 
+// Media attached to a post must belong to the user — foreign or bogus ids are
+// silently dropped (same policy as channelIds).
+async function validMediaIds(userId: string, mediaIds: unknown[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const mid of mediaIds) {
+    if (typeof mid !== 'string') continue;
+    const m = await one<{ id: string }>('SELECT id FROM media WHERE id = $1 AND user_id = $2', [mid, userId]);
+    if (m) out.push(mid);
+  }
+  return out;
+}
+
+// Postgres text/jsonb cannot store NUL bytes — strip them from all
+// user-supplied text before it reaches the database.
+function cleanText(s: string): string {
+  return typeof s === 'string' ? s.replace(/\0/g, '') : '';
+}
+
 export async function createPost(
   user: User,
   body: PostInput,
 ): Promise<{ post?: PostDTO; error?: string; status?: number; upgrade?: boolean }> {
-  const content = (body.content ?? '').trim();
-  const media = Array.isArray(body.media) ? body.media : [];
+  const content = cleanText(body.content ?? '').trim();
+  const media = await validMediaIds(user.id, Array.isArray(body.media) ? body.media : []);
   const scheduledAt = body.scheduled_at ?? null;
   const channelIds = await validChannelIds(user.id, body.channelIds ?? []);
   const comments = parseComments(body.comments);
@@ -242,7 +260,7 @@ export async function createPost(
   for (const cid of channelIds) {
     await query(
       'INSERT INTO post_targets (id, post_id, channel_id, content_override, status, retry_count) VALUES ($1,$2,$3,$4,$5,0)',
-      [crypto.randomUUID(), id, cid, body.overrides?.[cid]?.trim() || null, 'pending'],
+      [crypto.randomUUID(), id, cid, cleanText(body.overrides?.[cid] ?? '').trim() || null, 'pending'],
     );
   }
   return { post: (await getPostDTO(id, user.id)) ?? undefined };
@@ -260,8 +278,13 @@ export async function updatePost(
   const existing = await one<Post>('SELECT * FROM posts WHERE id = $1 AND user_id = $2', [postId, userId]);
   if (!existing) return { error: 'Post not found', status: 404 };
 
-  const content = body.content !== undefined ? body.content.trim() : existing.content;
-  const media = body.media !== undefined ? body.media : Array.isArray(existing.media) ? existing.media : [];
+  const content = body.content !== undefined ? cleanText(body.content).trim() : existing.content;
+  const media =
+    body.media !== undefined
+      ? await validMediaIds(userId, Array.isArray(body.media) ? body.media : [])
+      : Array.isArray(existing.media)
+        ? existing.media
+        : [];
   const scheduledAt = body.scheduled_at !== undefined ? body.scheduled_at : existing.scheduled_at;
 
   const comments = body.comments !== undefined ? parseComments(body.comments) : null;
@@ -317,7 +340,7 @@ export async function updatePost(
       if (!have.has(cid)) {
         await query(
           'INSERT INTO post_targets (id, post_id, channel_id, content_override, status, retry_count) VALUES ($1,$2,$3,$4,$5,0)',
-          [crypto.randomUUID(), postId, cid, body.overrides?.[cid]?.trim() || null, 'pending'],
+          [crypto.randomUUID(), postId, cid, cleanText(body.overrides?.[cid] ?? '').trim() || null, 'pending'],
         );
       }
     }
@@ -327,7 +350,7 @@ export async function updatePost(
     for (const [cid, text] of Object.entries(body.overrides)) {
       await query(
         `UPDATE post_targets SET content_override = $1 WHERE post_id = $2 AND channel_id = $3 AND status = 'pending'`,
-        [text?.trim() || null, postId, cid],
+        [cleanText(text ?? '').trim() || null, postId, cid],
       );
     }
   }
