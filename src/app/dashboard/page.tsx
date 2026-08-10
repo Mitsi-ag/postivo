@@ -137,13 +137,13 @@ export default function DashboardPage() {
         <ErrorBanner message={error} />
 
         {analytics === null && !error ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             {Array.from({ length: 5 }, (_, i) => (
               <Skeleton key={i} className="h-28" />
             ))}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             {stats.map((s) => (
               <div key={s.label} className={`${cardCls} lift relative overflow-hidden`}>
                 <div className="flex items-center justify-between">

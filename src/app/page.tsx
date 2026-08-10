@@ -297,8 +297,8 @@ Authorization: Bearer pv_…
           title="Postiz vs Postivo"
           sub="Same job. A tenth of the moving parts."
         />
-        <div className="edge-top mx-auto mt-14 max-w-4xl overflow-hidden rounded-card border border-line bg-surface">
-          <table className="w-full text-sm">
+        <div className="edge-top mx-auto mt-14 max-w-4xl overflow-x-auto rounded-card border border-line bg-surface">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-line text-left">
                 <th className="px-5 py-3.5 font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-dim" />

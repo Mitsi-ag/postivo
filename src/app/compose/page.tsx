@@ -363,7 +363,7 @@ function ComposeInner() {
                 <label htmlFor="compose-content" className="text-sm font-medium text-fg">
                   Content
                 </label>
-                <span className={`text-xs ${overLimit ? 'font-semibold text-err' : 'text-dim'}`}>
+                <span className={`font-mono text-xs ${overLimit ? 'font-semibold text-err' : 'text-dim'}`}>
                   {content.length}
                   {charLimit !== null ? ` / ${charLimit}` : ''} chars
                 </span>
