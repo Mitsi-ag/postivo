@@ -42,8 +42,9 @@ export default function LoginPage() {
           <h1 className="font-display text-lg font-semibold text-fg">Welcome back</h1>
           <ErrorBanner message={error} />
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Email</label>
+            <label htmlFor="login-email" className="mb-1 block text-xs font-medium text-mut">Email</label>
             <input
+              id="login-email"
               type="email"
               required
               autoComplete="email"
@@ -54,8 +55,9 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Password</label>
+            <label htmlFor="login-password" className="mb-1 block text-xs font-medium text-mut">Password</label>
             <input
+              id="login-password"
               type="password"
               required
               autoComplete="current-password"

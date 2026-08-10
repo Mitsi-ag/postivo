@@ -43,8 +43,9 @@ export default function RegisterPage() {
           <h1 className="font-display text-lg font-semibold text-fg">Create your account</h1>
           <ErrorBanner message={error} />
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Name</label>
+            <label htmlFor="reg-name" className="mb-1 block text-xs font-medium text-mut">Name</label>
             <input
+              id="reg-name"
               type="text"
               required
               autoComplete="name"
@@ -55,8 +56,9 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Email</label>
+            <label htmlFor="reg-email" className="mb-1 block text-xs font-medium text-mut">Email</label>
             <input
+              id="reg-email"
               type="email"
               required
               autoComplete="email"
@@ -67,8 +69,9 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Password</label>
+            <label htmlFor="reg-password" className="mb-1 block text-xs font-medium text-mut">Password</label>
             <input
+              id="reg-password"
               type="password"
               required
               minLength={8}

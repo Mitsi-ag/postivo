@@ -404,7 +404,7 @@ function ComposeInner() {
             {/* Channels */}
             <div className={cardCls}>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <label className="text-sm font-medium text-fg">Channels</label>
+                <span className="text-sm font-medium text-fg">Channels</span>
                 <div className="flex items-center gap-2">
                   {sets.length > 0 && (
                     <select
@@ -500,7 +500,7 @@ function ComposeInner() {
             {/* Follow-ups (thread) */}
             <div className={cardCls}>
               <div className="mb-1 flex items-center justify-between">
-                <label className="text-sm font-medium text-fg">Follow-ups</label>
+                <span className="text-sm font-medium text-fg">Follow-ups</span>
                 <button
                   onClick={() => setComments((c) => [...c, { content: '', delayMin: 5 }])}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised"
@@ -560,7 +560,7 @@ function ComposeInner() {
 
             {/* Media */}
             <div className={cardCls}>
-              <label className="mb-3 block text-sm font-medium text-fg">Media</label>
+              <span className="mb-3 block text-sm font-medium text-fg">Media</span>
               <div
                 onDragOver={(e) => {
                   e.preventDefault();

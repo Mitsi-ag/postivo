@@ -134,8 +134,9 @@ export default function ChannelsPage() {
                 Connect <span className="font-medium text-fg">{addingProvider.name}</span>
               </p>
               <div>
-                <label className="mb-1 block text-xs font-medium text-mut">Display name</label>
+                <label htmlFor="channel-name" className="mb-1 block text-xs font-medium text-mut">Display name</label>
                 <input
+                  id="channel-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className={inputCls}
@@ -144,11 +145,12 @@ export default function ChannelsPage() {
               </div>
               {addingProvider.fields.map((f) => (
                 <div key={f.key}>
-                  <label className="mb-1 block text-xs font-medium text-mut">
+                  <label htmlFor={`channel-field-${f.key}`} className="mb-1 block text-xs font-medium text-mut">
                     {f.label}
                     {f.optional && <span className="text-dim"> (optional)</span>}
                   </label>
                   <input
+                    id={`channel-field-${f.key}`}
                     type={f.secret ? 'password' : 'text'}
                     value={form[f.key] ?? ''}
                     onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}

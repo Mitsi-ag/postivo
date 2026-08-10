@@ -139,12 +139,13 @@ export default function SettingsPage() {
           <h2 className="font-semibold text-fg">Profile</h2>
           {profileMsg && <p className="text-xs text-ok">{profileMsg}</p>}
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
+            <label htmlFor="profile-name" className="mb-1 block text-xs font-medium text-mut">Name</label>
+            <input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Timezone</label>
+            <label htmlFor="profile-timezone" className="mb-1 block text-xs font-medium text-mut">Timezone</label>
             <input
+              id="profile-timezone"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
               className={inputCls}
@@ -160,8 +161,9 @@ export default function SettingsPage() {
           <h2 className="font-semibold text-fg">Change password</h2>
           {pwMsg && <p className="text-xs text-ok">{pwMsg}</p>}
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Current password</label>
+            <label htmlFor="pw-current" className="mb-1 block text-xs font-medium text-mut">Current password</label>
             <input
+              id="pw-current"
               type="password"
               required
               autoComplete="current-password"
@@ -171,8 +173,9 @@ export default function SettingsPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">New password</label>
+            <label htmlFor="pw-new" className="mb-1 block text-xs font-medium text-mut">New password</label>
             <input
+              id="pw-new"
               type="password"
               required
               minLength={8}
@@ -260,8 +263,9 @@ export default function SettingsPage() {
             media, RSS feeds and API keys. Confirm with your password.
           </p>
           <div>
-            <label className="mb-1 block text-xs font-medium text-mut">Password</label>
+            <label htmlFor="delete-password" className="mb-1 block text-xs font-medium text-mut">Password</label>
             <input
+              id="delete-password"
               type="password"
               required
               autoComplete="current-password"
