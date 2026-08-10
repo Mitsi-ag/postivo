@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
+import { ProviderMark, RssIcon, SparkIcon } from '@/components/icons';
 import { btnDanger, btnPrimary, cardCls, EmptyState, ErrorBanner, inputCls, SkeletonCards } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PublicUser, RssFeedDTO } from '@/lib/types';
@@ -50,7 +51,7 @@ export default function AutomationPage() {
 
   const channelName = (id: string) => {
     const c = channels.find((x) => x.id === id);
-    return c ? `${c.provider_meta?.icon ?? ''} ${c.name}` : 'deleted channel';
+    return c ? c.name : 'deleted channel';
   };
 
   async function addFeed(e: React.FormEvent) {
@@ -116,8 +117,8 @@ export default function AutomationPage() {
 
         {/* RSS feeds */}
         <div className={cardCls}>
-          <h2 className="font-semibold text-white">RSS auto-posting</h2>
-          <p className="mt-1 text-xs text-slate-500">
+          <h2 className="font-semibold text-fg">RSS auto-posting</h2>
+          <p className="mt-1 text-xs text-dim">
             Poll a feed and automatically schedule new items to your channels.
           </p>
 
@@ -131,9 +132,9 @@ export default function AutomationPage() {
               required
             />
             {channels.length === 0 ? (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-dim">
                 No channels yet —{' '}
-                <a href="/channels" className="text-indigo-400 hover:text-indigo-300">
+                <a href="/channels" className="text-iris-soft hover:text-iris-soft">
                   connect one first
                 </a>
                 .
@@ -150,18 +151,19 @@ export default function AutomationPage() {
                       aria-pressed={active}
                       className={`rounded-full border px-3 py-1.5 text-xs transition ${
                         active
-                          ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200'
-                          : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                          ? 'border-iris bg-iris/10 text-iris-soft'
+                          : 'border-line text-mut hover:border-line2'
                       }`}
                     >
-                      {c.provider_meta?.icon} {c.name}
+                      <ProviderMark id={c.provider} name={c.provider_meta?.name ?? c.provider} color={c.provider_meta?.color} size={16} />
+                      {c.name}
                     </button>
                   );
                 })}
               </div>
             )}
             <div className="flex flex-wrap items-center gap-4">
-              <label className="flex items-center gap-2 text-xs text-slate-400">
+              <label className="flex items-center gap-2 text-xs text-mut">
                 Poll every
                 <input
                   type="number"
@@ -169,18 +171,19 @@ export default function AutomationPage() {
                   max={1440}
                   value={intervalMin}
                   onChange={(e) => setIntervalMin(e.target.value)}
-                  className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  className="w-20 rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-fg focus:border-iris focus:outline-none"
                 />
                 minutes
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-mut">
                 <input
                   type="checkbox"
                   checked={aiCaption}
                   onChange={(e) => setAiCaption(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 accent-indigo-600"
+                  className="h-4 w-4 rounded border-line2 bg-surface accent-iris"
                 />
-                ✨ Generate AI caption for each item
+                <SparkIcon size={13} className="text-iris-soft" />
+                Generate AI caption for each item
               </label>
               <button type="submit" disabled={feedBusy || channels.length === 0} className={`${btnPrimary} ml-auto`}>
                 {feedBusy ? 'Adding…' : 'Add feed'}
@@ -192,21 +195,22 @@ export default function AutomationPage() {
             {feeds === null ? (
               <SkeletonCards count={2} height="h-16" />
             ) : feeds.length === 0 ? (
-              <EmptyState icon="📡" title="No feeds yet" hint="Add a blog or news feed above and Postivo will schedule new items for you." />
+              <EmptyState icon={<RssIcon size={18} />} title="No feeds yet" hint="Add a blog or news feed above and Postivo will schedule new items for you." />
             ) : (
-              <ul className="divide-y divide-slate-800">
+              <ul className="divide-y divide-line/60">
                 {feeds.map((f) => (
                   <li key={f.id} className="flex items-start justify-between gap-4 py-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm text-slate-200" title={f.url}>
+                      <p className="truncate text-sm text-fg" title={f.url}>
                         {f.url}
                         {f.ai_caption && (
-                          <span className="ml-2 rounded-full border border-indigo-800 bg-indigo-950/50 px-1.5 py-0.5 text-[10px] text-indigo-300">
-                            ✨ AI captions
+                          <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-iris/30 bg-iris/10 px-1.5 py-0.5 font-mono text-[10px] text-iris-soft">
+                            <SparkIcon size={9} />
+                            AI captions
                           </span>
                         )}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-dim">
                         → {f.channel_ids.map(channelName).join(', ') || 'no channels'} · every {f.interval_min}m · last
                         polled {f.last_polled_at ? formatDate(f.last_polled_at) : 'never'}
                       </p>
@@ -224,20 +228,20 @@ export default function AutomationPage() {
         {/* Signature + outbound webhook */}
         <form onSubmit={saveAutomation} className={`${cardCls} space-y-4`}>
           <div>
-            <h2 className="font-semibold text-white">Signature & webhooks</h2>
-            <p className="mt-1 text-xs text-slate-500">
+            <h2 className="font-semibold text-fg">Signature & webhooks</h2>
+            <p className="mt-1 text-xs text-dim">
               A signature is appended to every post at publish time. The outbound webhook receives a JSON event for
               every published or failed target.
             </p>
           </div>
 
           <div>
-            <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-fg">
               <input
                 type="checkbox"
                 checked={signatureEnabled}
                 onChange={(e) => setSignatureEnabled(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-600 bg-slate-900 accent-indigo-600"
+                className="h-4 w-4 rounded border-line2 bg-surface accent-iris"
               />
               Append signature to posts
             </label>
@@ -254,7 +258,7 @@ export default function AutomationPage() {
           </div>
 
           <div>
-            <label htmlFor="outbound-webhook" className="mb-1 block text-sm text-slate-300">
+            <label htmlFor="outbound-webhook" className="mb-1 block text-sm text-fg">
               Outbound webhook URL
             </label>
             <input

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
+import { CalendarIcon } from '@/components/icons';
 import { Badge, cardCls, EmptyState, ErrorBanner, selectCls, Skeleton } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PostDTO } from '@/lib/types';
@@ -13,10 +14,10 @@ function dayKey(d: Date): string {
 }
 
 const DOT_COLOR: Record<string, string> = {
-  scheduled: 'bg-indigo-400',
-  published: 'bg-emerald-400',
-  failed: 'bg-red-400',
-  draft: 'bg-slate-500',
+  scheduled: 'bg-iris',
+  published: 'bg-ok',
+  failed: 'bg-err',
+  draft: 'bg-dim',
 };
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -118,19 +119,19 @@ export default function CalendarPage() {
         key={key}
         onClick={() => setSelectedDay(active ? null : key)}
         aria-label={`${dayPosts.length} posts on ${key}`}
-        className={`flex min-h-20 flex-col rounded-lg border p-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
-          active ? 'border-indigo-500 bg-indigo-950/40' : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'
+        className={`flex min-h-20 flex-col rounded-lg border p-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
+          active ? 'border-iris bg-iris/10' : 'border-line bg-surface hover:border-line2'
         } ${extraCls}`}
       >
-        <span className={`text-xs ${isToday ? 'font-bold text-indigo-300' : 'text-slate-400'}`}>{dayNum}</span>
+        <span className={`text-xs ${isToday ? 'font-bold text-iris-soft' : 'text-mut'}`}>{dayNum}</span>
         <div className="mt-1 space-y-1">
           {dayPosts.slice(0, 3).map((p) => (
             <div key={p.id} className="flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[p.status] ?? DOT_COLOR.draft}`} />
-              <span className="truncate text-[10px] text-slate-400">{p.content || '(media)'}</span>
+              <span className="truncate text-[10px] text-mut">{p.content || '(media)'}</span>
             </div>
           ))}
-          {dayPosts.length > 3 && <div className="text-[10px] text-slate-500">+{dayPosts.length - 3} more</div>}
+          {dayPosts.length > 3 && <div className="text-[10px] text-dim">+{dayPosts.length - 3} more</div>}
         </div>
       </button>
     );
@@ -152,7 +153,7 @@ export default function CalendarPage() {
             <option value="">All channels</option>
             {channels.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.provider_meta?.icon} {c.name}
+                {c.name}
               </option>
             ))}
           </select>
@@ -175,12 +176,12 @@ export default function CalendarPage() {
                 setChannelFilter('');
                 setTagFilter('');
               }}
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-dim hover:text-fg"
             >
               Clear filters
             </button>
           )}
-          <div className="ml-auto flex gap-1 rounded-lg border border-slate-800 bg-slate-900/50 p-1" role="group" aria-label="Calendar view">
+          <div className="ml-auto flex gap-1 rounded-lg border border-line bg-surface p-1" role="group" aria-label="Calendar view">
             {(['month', 'week'] as const).map((v) => (
               <button
                 key={v}
@@ -191,7 +192,7 @@ export default function CalendarPage() {
                 }}
                 aria-pressed={view === v}
                 className={`rounded-md px-3 py-1 text-xs capitalize ${
-                  view === v ? 'bg-indigo-600 font-medium text-white' : 'text-slate-400 hover:text-slate-200'
+                  view === v ? 'bg-iris font-medium text-fg' : 'text-mut hover:text-fg'
                 }`}
               >
                 {v}
@@ -205,12 +206,12 @@ export default function CalendarPage() {
             <button
               onClick={() => shift(-1)}
               aria-label="Previous"
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+              className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
             >
               ← Prev
             </button>
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-white">{label}</h2>
+              <h2 className="text-lg font-semibold text-fg">{label}</h2>
               <button
                 onClick={() => {
                   const d = new Date();
@@ -218,7 +219,7 @@ export default function CalendarPage() {
                   setCursor(d);
                   setSelectedDay(null);
                 }}
-                className="text-xs text-indigo-400 hover:text-indigo-300"
+                className="text-xs text-iris-soft hover:text-iris-soft"
               >
                 Today
               </button>
@@ -226,12 +227,12 @@ export default function CalendarPage() {
             <button
               onClick={() => shift(1)}
               aria-label="Next"
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+              className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
             >
               Next →
             </button>
           </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500">
+          <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-dim">
             {WEEKDAYS.map((d) => (
               <div key={d} className="py-1">
                 {d}
@@ -263,7 +264,7 @@ export default function CalendarPage() {
 
         {selectedDay && (
           <div className={cardCls}>
-            <h3 className="mb-3 font-semibold text-white">
+            <h3 className="mb-3 font-semibold text-fg">
               {new Date(`${selectedDay}T12:00:00`).toLocaleDateString(undefined, {
                 weekday: 'long',
                 month: 'long',
@@ -271,17 +272,17 @@ export default function CalendarPage() {
               })}
             </h3>
             {selectedPosts.length === 0 ? (
-              <EmptyState icon="🌴" title="No posts on this day" hint="Pick a slot and compose something." />
+              <EmptyState icon={<CalendarIcon size={18} />} title="No posts on this day" hint="PICK A SLOT AND COMPOSE SOMETHING" />
             ) : (
-              <ul className="divide-y divide-slate-800">
+              <ul className="divide-y divide-line/60">
                 {selectedPosts.map((p) => (
                   <li key={p.id} className="flex items-start justify-between gap-4 py-3">
                     <div className="min-w-0">
-                      <p className="text-sm text-slate-200">{p.content || '(media only)'}</p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="text-sm text-fg">{p.content || '(media only)'}</p>
+                      <p className="mt-1 text-xs text-dim">
                         {formatDate(p.scheduled_at ?? p.created_at)} ·{' '}
                         {p.targets.map((t) => t.channel_name ?? t.provider).join(', ') || 'no channels'}
-                        {p.repeat_every_days ? ` · ♻️ every ${p.repeat_every_days}d` : ''}
+                        {p.repeat_every_days ? ` · every ${p.repeat_every_days}d` : ''}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
@@ -289,7 +290,7 @@ export default function CalendarPage() {
                       {(p.status === 'scheduled' || p.status === 'draft') && (
                         <Link
                           href={`/compose?post=${p.id}`}
-                          className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                          className="rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:bg-raised"
                         >
                           Edit
                         </Link>

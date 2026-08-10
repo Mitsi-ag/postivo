@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { AlertIcon, CheckIcon, XIcon } from '@/components/icons';
 
 type ToastKind = 'success' | 'error';
 
@@ -49,20 +50,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex items-start gap-2 rounded-xl border px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur ${
+            className={`pointer-events-auto flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm shadow-lg shadow-black/50 backdrop-blur-md ${
               t.kind === 'success'
-                ? 'border-emerald-800 bg-emerald-950/90 text-emerald-200'
-                : 'border-red-800 bg-red-950/90 text-red-200'
+                ? 'border-ok/25 bg-[#0a1410]/95 text-ok'
+                : 'border-err/25 bg-[#160b0d]/95 text-err'
             }`}
           >
-            <span aria-hidden>{t.kind === 'success' ? '✓' : '✕'}</span>
-            <span className="min-w-0 flex-1 break-words">{t.message}</span>
+            <span aria-hidden className="mt-0.5 shrink-0">
+              {t.kind === 'success' ? <CheckIcon size={14} /> : <AlertIcon size={14} />}
+            </span>
+            <span className="min-w-0 flex-1 break-words text-fg/90">{t.message}</span>
             <button
               onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}
               aria-label="Dismiss notification"
-              className="shrink-0 opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded"
+              className="shrink-0 rounded opacity-50 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
             >
-              ×
+              <XIcon size={13} />
             </button>
           </div>
         ))}

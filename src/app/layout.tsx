@@ -1,6 +1,25 @@
 import type { Metadata } from 'next';
+import { Instrument_Sans, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
 import { ToastProvider } from '@/components/toast';
 import './globals.css';
+
+const display = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['600', '700'],
+  variable: '--font-space-grotesk',
+});
+
+const sans = Instrument_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-instrument-sans',
+});
+
+const mono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-jetbrains-mono',
+});
 
 export const metadata: Metadata = {
   title: 'Postivo — Schedule everywhere. Self-host anywhere.',
@@ -10,8 +29,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen antialiased">
+    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+      <body className="min-h-screen font-sans antialiased">
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Portal from '@/components/Portal';
+import { ProviderMark } from '@/components/icons';
 import { Badge, btnDanger, btnGhost, btnPrimary, cardCls, ErrorBanner, inputCls, UpgradeBanner } from '@/components/ui';
 import { api, ApiError, formatDate } from '@/lib/client';
 import type { ChannelDTO, ProviderMeta } from '@/lib/types';
@@ -75,23 +76,23 @@ export default function ChannelsPage() {
         <ErrorBanner message={error} />
 
         <div className={cardCls}>
-          <h2 className="mb-4 font-semibold text-white">Connected channels</h2>
+          <h2 className="mb-4 font-semibold text-fg">Connected channels</h2>
           {channels.length === 0 ? (
-            <p className="text-sm text-slate-500">No channels connected yet. Add one below.</p>
+            <p className="text-sm text-dim">No channels connected yet. Add one below.</p>
           ) : (
-            <ul className="divide-y divide-slate-800">
+            <ul className="divide-y divide-line/60">
               {channels.map((c) => (
                 <li key={c.id} className="flex items-center justify-between gap-4 py-3">
                   <div className="flex items-center gap-3">
-                    <span
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-lg"
-                      style={{ backgroundColor: `${c.provider_meta?.color ?? '#334155'}22` }}
-                    >
-                      {c.provider_meta?.icon ?? '❓'}
-                    </span>
+                    <ProviderMark
+                      id={c.provider}
+                      name={c.provider_meta?.name ?? c.provider}
+                      color={c.provider_meta?.color}
+                      size={32}
+                    />
                     <div>
-                      <p className="text-sm font-medium text-slate-200">{c.name}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-sm font-medium text-fg">{c.name}</p>
+                      <p className="text-xs text-dim">
                         {c.provider_meta?.name ?? c.provider} · added {formatDate(c.created_at)}
                       </p>
                     </div>
@@ -109,30 +110,31 @@ export default function ChannelsPage() {
         </div>
 
         <div className={cardCls}>
-          <h2 className="mb-4 font-semibold text-white">Add a channel</h2>
+          <h2 className="mb-4 font-semibold text-fg">Add a channel</h2>
           <div className="flex flex-wrap gap-2">
             {providers.map((p) => (
               <button
                 key={p.id}
                 onClick={() => startAdd(p)}
-                className={`rounded-lg border px-3 py-2 text-sm transition ${
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
                   addingProvider?.id === p.id
-                    ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200'
-                    : 'border-slate-700 text-slate-300 hover:border-slate-500'
+                    ? 'border-iris bg-iris/10 text-iris-soft'
+                    : 'border-line text-mut hover:border-line2 hover:text-fg'
                 }`}
               >
-                {p.icon} {p.name}
+                <ProviderMark id={p.id} name={p.name} color={p.color} size={18} />
+                {p.name}
               </button>
             ))}
           </div>
 
           {addingProvider && (
-            <form onSubmit={submit} className="mt-5 space-y-3 border-t border-slate-800 pt-5">
-              <p className="text-sm text-slate-400">
-                Connect <span className="font-medium text-slate-200">{addingProvider.name}</span>
+            <form onSubmit={submit} className="mt-5 space-y-3 border-t border-line pt-5">
+              <p className="text-sm text-mut">
+                Connect <span className="font-medium text-fg">{addingProvider.name}</span>
               </p>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-400">Display name</label>
+                <label className="mb-1 block text-xs font-medium text-mut">Display name</label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -142,9 +144,9 @@ export default function ChannelsPage() {
               </div>
               {addingProvider.fields.map((f) => (
                 <div key={f.key}>
-                  <label className="mb-1 block text-xs font-medium text-slate-400">
+                  <label className="mb-1 block text-xs font-medium text-mut">
                     {f.label}
-                    {f.optional && <span className="text-slate-600"> (optional)</span>}
+                    {f.optional && <span className="text-dim"> (optional)</span>}
                   </label>
                   <input
                     type={f.secret ? 'password' : 'text'}

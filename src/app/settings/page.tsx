@@ -136,14 +136,14 @@ export default function SettingsPage() {
         <ErrorBanner message={error} />
 
         <form onSubmit={saveProfile} className={`${cardCls} space-y-3`}>
-          <h2 className="font-semibold text-white">Profile</h2>
-          {profileMsg && <p className="text-xs text-emerald-400">{profileMsg}</p>}
+          <h2 className="font-semibold text-fg">Profile</h2>
+          {profileMsg && <p className="text-xs text-ok">{profileMsg}</p>}
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">Name</label>
+            <label className="mb-1 block text-xs font-medium text-mut">Name</label>
             <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">Timezone</label>
+            <label className="mb-1 block text-xs font-medium text-mut">Timezone</label>
             <input
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
@@ -157,10 +157,10 @@ export default function SettingsPage() {
         </form>
 
         <form onSubmit={changePassword} className={`${cardCls} space-y-3`}>
-          <h2 className="font-semibold text-white">Change password</h2>
-          {pwMsg && <p className="text-xs text-emerald-400">{pwMsg}</p>}
+          <h2 className="font-semibold text-fg">Change password</h2>
+          {pwMsg && <p className="text-xs text-ok">{pwMsg}</p>}
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">Current password</label>
+            <label className="mb-1 block text-xs font-medium text-mut">Current password</label>
             <input
               type="password"
               required
@@ -171,7 +171,7 @@ export default function SettingsPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">New password</label>
+            <label className="mb-1 block text-xs font-medium text-mut">New password</label>
             <input
               type="password"
               required
@@ -188,23 +188,23 @@ export default function SettingsPage() {
         </form>
 
         <div className={`${cardCls} space-y-3`}>
-          <h2 className="font-semibold text-white">API keys</h2>
-          <p className="text-xs text-slate-500">
-            Use keys as <code className="rounded bg-slate-800 px-1">Authorization: Bearer pv_…</code> on the{' '}
-            <code className="rounded bg-slate-800 px-1">/api/v1/*</code> endpoints.
+          <h2 className="font-semibold text-fg">API keys</h2>
+          <p className="text-xs text-dim">
+            Use keys as <code className="rounded bg-raised px-1">Authorization: Bearer pv_…</code> on the{' '}
+            <code className="rounded bg-raised px-1">/api/v1/*</code> endpoints.
           </p>
 
           {createdKey && (
-            <div className="rounded-lg border border-emerald-800 bg-emerald-950/50 p-3">
-              <p className="mb-1 text-xs font-medium text-emerald-300">
+            <div className="rounded-lg border border-ok/30 bg-ok/10 p-3">
+              <p className="mb-1 text-xs font-medium text-ok">
                 Key created — copy it now, it will not be shown again:
               </p>
-              <code className="block break-all rounded bg-slate-900 px-2 py-1.5 text-xs text-emerald-200">
+              <code className="block break-all rounded bg-surface px-2 py-1.5 text-xs text-ok">
                 {createdKey.token}
               </code>
               <button
                 onClick={() => setCreatedKey(null)}
-                className="mt-2 text-xs text-slate-400 hover:text-slate-200"
+                className="mt-2 text-xs text-mut hover:text-fg"
               >
                 Dismiss
               </button>
@@ -224,12 +224,12 @@ export default function SettingsPage() {
           </form>
 
           {keys.length > 0 && (
-            <ul className="divide-y divide-slate-800">
+            <ul className="divide-y divide-line/60">
               {keys.map((k) => (
                 <li key={k.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                   <div>
-                    <p className="text-slate-200">{k.name}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-fg">{k.name}</p>
+                    <p className="text-xs text-dim">
                       <code>{k.key_prefix}…</code> · created {formatDate(k.created_at)}
                       {k.last_used_at ? ` · last used ${formatDate(k.last_used_at)}` : ' · never used'}
                     </p>
@@ -244,8 +244,8 @@ export default function SettingsPage() {
         </div>
 
         <div className={cardCls}>
-          <h2 className="mb-2 font-semibold text-white">Export data</h2>
-          <p className="mb-3 text-xs text-slate-500">
+          <h2 className="mb-2 font-semibold text-fg">Export data</h2>
+          <p className="mb-3 text-xs text-dim">
             Download all of your data — profile, channels, posts, targets and API key metadata — as JSON.
           </p>
           <button onClick={() => void exportData()} className={btnPrimary}>
@@ -253,14 +253,14 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        <form onSubmit={deleteAccount} className={`${cardCls} space-y-3 border-red-900/60`}>
-          <h2 className="font-semibold text-red-400">Danger zone</h2>
-          <p className="text-xs text-slate-500">
+        <form onSubmit={deleteAccount} className={`${cardCls} space-y-3 border-err/25`}>
+          <h2 className="font-semibold text-err">Danger zone</h2>
+          <p className="text-xs text-dim">
             Permanently delete your account and everything attached to it — posts, channels, scheduled content,
             media, RSS feeds and API keys. Confirm with your password.
           </p>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">Password</label>
+            <label className="mb-1 block text-xs font-medium text-mut">Password</label>
             <input
               type="password"
               required

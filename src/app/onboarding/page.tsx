@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { btnGhost, btnPrimary, ErrorBanner, inputCls, UpgradeBanner } from '@/components/ui';
+import { CheckIcon, Wordmark } from '@/components/icons';
 import { api, ApiError } from '@/lib/client';
 import { useRequireAuth } from '@/lib/useRequireAuth';
 
@@ -22,7 +23,7 @@ export default function OnboardingPage() {
   if (loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-sm text-slate-500">Loading…</div>
+        <div className="text-sm text-dim">Loading…</div>
       </div>
     );
   }
@@ -63,9 +64,16 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center text-2xl font-bold text-white">⚡ Postivo</div>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[760px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        style={{ background: 'radial-gradient(closest-side, rgba(110,107,240,.12), transparent)' }}
+      />
+      <div className="relative w-full max-w-md">
+        <div className="mb-8 flex justify-center">
+          <Wordmark size={20} />
+        </div>
 
         {/* Step indicator */}
         <div className="mb-6 flex items-center justify-center gap-2">
@@ -74,33 +82,33 @@ export default function OnboardingPage() {
               <span
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
                   i < step
-                    ? 'bg-emerald-600 text-white'
+                    ? 'bg-ok text-fg'
                     : i === step
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800 text-slate-500'
+                      ? 'bg-iris text-fg'
+                      : 'bg-raised text-dim'
                 }`}
               >
-                {i < step ? '✓' : i + 1}
+                {i < step ? <CheckIcon size={13} /> : i + 1}
               </span>
-              <span className={`text-xs ${i === step ? 'text-white' : 'text-slate-500'}`}>{label}</span>
-              {i < STEPS.length - 1 && <span className="mx-1 h-px w-6 bg-slate-700" />}
+              <span className={`text-xs ${i === step ? 'text-fg' : 'text-dim'}`}>{label}</span>
+              {i < STEPS.length - 1 && <span className="mx-1 h-px w-6 bg-raised" />}
             </div>
           ))}
         </div>
 
-        <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+        <div className="edge-top space-y-4 rounded-card border border-line bg-surface p-6">
           <UpgradeBanner show={showUpgrade} />
           <ErrorBanner message={error} />
 
           {step === 0 && (
             <>
-              <h1 className="text-lg font-semibold text-white">Connect your first channel</h1>
-              <p className="text-sm text-slate-400">
+              <h1 className="font-display text-lg font-semibold text-fg">Connect your first channel</h1>
+              <p className="text-sm text-mut">
                 Channels are where your posts get published. Start with the built-in demo channel — you can add
                 Bluesky, Mastodon, X, LinkedIn, DEV or a webhook later.
               </p>
               <button onClick={connectDemo} disabled={busy} className={`${btnPrimary} w-full`}>
-                {busy ? 'Connecting…' : '🧪 Add demo channel'}
+                {busy ? 'Connecting…' : 'Add demo channel'}
               </button>
               <button onClick={() => setStep(1)} className={`${btnGhost} w-full`}>
                 Skip for now
@@ -110,14 +118,14 @@ export default function OnboardingPage() {
 
           {step === 1 && (
             <>
-              <h1 className="text-lg font-semibold text-white">Compose your first post</h1>
-              <p className="text-sm text-slate-400">Write something — it will be saved as a draft.</p>
+              <h1 className="font-display text-lg font-semibold text-fg">Compose your first post</h1>
+              <p className="text-sm text-mut">Write something — it will be saved as a draft.</p>
               <textarea
                 rows={4}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className={inputCls}
-                placeholder="Hello world 👋"
+                placeholder="Hello world"
               />
               <button onClick={saveDraft} disabled={busy || !content.trim()} className={`${btnPrimary} w-full`}>
                 {busy ? 'Saving…' : 'Save draft'}
@@ -130,12 +138,15 @@ export default function OnboardingPage() {
 
           {step === 2 && (
             <>
-              <h1 className="text-lg font-semibold text-white">You're all set 🎉</h1>
-              <p className="text-sm text-slate-400">
+              <h1 className="flex items-center gap-2 font-display text-lg font-semibold text-fg">
+                <CheckIcon size={18} className="text-ok" />
+                You&apos;re all set
+              </h1>
+              <p className="text-sm text-mut">
                 Head to your dashboard to schedule posts, connect real channels and explore the calendar.
               </p>
               <Link href="/dashboard" className={`${btnPrimary} w-full`}>
-                Go to dashboard →
+                Go to dashboard
               </Link>
             </>
           )}
@@ -143,7 +154,7 @@ export default function OnboardingPage() {
 
         <button
           onClick={() => router.push('/dashboard')}
-          className="mt-4 block w-full text-center text-xs text-slate-600 hover:text-slate-400"
+          className="mt-4 block w-full text-center text-xs text-dim hover:text-mut"
         >
           Skip onboarding entirely
         </button>

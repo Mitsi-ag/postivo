@@ -5,6 +5,8 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
 import PostPreview from '@/components/PostPreview';
 import { useToast } from '@/components/toast';
+import { EyeIcon, FilmIcon, ImageIcon, PenIcon, PlusIcon, SparkIcon, XIcon } from '@/components/icons';
+import { ClockIcon, ProviderMark } from '@/components/icons';
 import { btnGhost, btnPrimary, cardCls, ErrorBanner, inputCls, TagChip, UpgradeBanner } from '@/components/ui';
 import { api, ApiError, formatDate, toLocalInput } from '@/lib/client';
 import type { ChannelDTO, ChannelSetDTO, MediaListItemDTO, PostCommentDTO, PostDTO, ProviderMeta, PublicUser } from '@/lib/types';
@@ -35,24 +37,24 @@ function MediaLibraryModal({ onPick, onClose }: MediaLibraryModalProps) {
       onClick={onClose}
     >
       <div
-        className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5"
+        className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line bg-surface p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-semibold text-white">Media library</h3>
-          <button onClick={onClose} aria-label="Close media library" className="text-slate-400 hover:text-white">
-            ✕
+          <h3 className="font-semibold text-fg">Media library</h3>
+          <button onClick={onClose} aria-label="Close media library" className="text-mut transition-colors hover:text-fg">
+            <XIcon size={16} />
           </button>
         </div>
         {error && <ErrorBanner message={error} />}
         {items === null ? (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
             {Array.from({ length: 8 }, (_, i) => (
-              <div key={i} className="aspect-square animate-pulse rounded-lg bg-slate-800" />
+              <div key={i} className="aspect-square animate-pulse rounded-lg bg-raised" />
             ))}
           </div>
         ) : items.length === 0 ? (
-          <p className="py-8 text-center text-sm text-slate-500">Your library is empty — upload something first.</p>
+          <p className="py-8 text-center text-sm text-dim">Your library is empty — upload something first.</p>
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
             {items.map((m) => (
@@ -60,15 +62,15 @@ function MediaLibraryModal({ onPick, onClose }: MediaLibraryModalProps) {
                 key={m.id}
                 onClick={() => onPick(m.id)}
                 title={m.name}
-                className="group relative aspect-square overflow-hidden rounded-lg border border-slate-700 hover:border-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="group relative aspect-square overflow-hidden rounded-lg border border-line hover:border-iris focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
               >
                 {m.mime.startsWith('image/') ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={`/api/media/${m.id}`} alt={m.name} className="h-full w-full object-cover" />
                 ) : (
-                  <span className="flex h-full w-full items-center justify-center bg-slate-800 text-3xl">🎬</span>
+                  <span className="flex h-full w-full items-center justify-center bg-raised text-dim"><FilmIcon size={22} /></span>
                 )}
-                <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1.5 py-0.5 text-left text-[10px] text-slate-300 opacity-0 group-hover:opacity-100">
+                <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1.5 py-0.5 text-left text-[10px] text-fg opacity-0 group-hover:opacity-100">
                   {m.name}
                 </span>
               </button>
@@ -358,10 +360,10 @@ function ComposeInner() {
             {/* Content */}
             <div className={cardCls}>
               <div className="mb-2 flex items-center justify-between">
-                <label htmlFor="compose-content" className="text-sm font-medium text-slate-300">
+                <label htmlFor="compose-content" className="text-sm font-medium text-fg">
                   Content
                 </label>
-                <span className={`text-xs ${overLimit ? 'font-semibold text-red-400' : 'text-slate-500'}`}>
+                <span className={`text-xs ${overLimit ? 'font-semibold text-err' : 'text-dim'}`}>
                   {content.length}
                   {charLimit !== null ? ` / ${charLimit}` : ''} chars
                 </span>
@@ -376,12 +378,13 @@ function ComposeInner() {
               />
               <div className="mt-3 flex items-center gap-3">
                 <button onClick={aiCaption} disabled={aiBusy} className={btnGhost}>
-                  {aiBusy ? '✨ Thinking…' : '✨ AI caption'}
+                  <SparkIcon size={14} className="text-iris-soft" />
+                  {aiBusy ? 'Thinking…' : 'AI caption'}
                 </button>
               </div>
               {suggestions.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  <p className="text-xs text-slate-500">Click a suggestion to use it:</p>
+                  <p className="text-xs text-dim">Click a suggestion to use it:</p>
                   {suggestions.map((s, i) => (
                     <button
                       key={i}
@@ -389,7 +392,7 @@ function ComposeInner() {
                         setContent(s);
                         setSuggestions([]);
                       }}
-                      className="block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-left text-sm text-slate-300 hover:border-indigo-600"
+                      className="block w-full rounded-lg border border-line bg-surface px-3 py-2 text-left text-sm text-fg hover:border-iris"
                     >
                       {s}
                     </button>
@@ -401,7 +404,7 @@ function ComposeInner() {
             {/* Channels */}
             <div className={cardCls}>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <label className="text-sm font-medium text-slate-300">Channels</label>
+                <label className="text-sm font-medium text-fg">Channels</label>
                 <div className="flex items-center gap-2">
                   {sets.length > 0 && (
                     <select
@@ -411,7 +414,7 @@ function ComposeInner() {
                         if (e.target.value) applySet(e.target.value);
                         e.target.value = '';
                       }}
-                      className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-300 focus:border-indigo-500 focus:outline-none"
+                      className="rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-fg focus:border-iris focus:outline-none"
                     >
                       <option value="" disabled>
                         Apply set…
@@ -423,15 +426,15 @@ function ComposeInner() {
                       ))}
                     </select>
                   )}
-                  <button onClick={() => void saveAsSet()} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
-                    ★ Save as set
+                  <button onClick={() => void saveAsSet()} className="rounded-lg border border-line px-2.5 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised">
+                    Save as set
                   </button>
                 </div>
               </div>
               {channels.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-dim">
                   No channels yet —{' '}
-                  <a href="/channels" className="text-indigo-400 hover:text-indigo-300">
+                  <a href="/channels" className="text-iris-soft hover:text-iris-soft">
                     connect one first
                   </a>
                   .
@@ -447,14 +450,15 @@ function ComposeInner() {
                           key={c.id}
                           onClick={() => setSelected((s) => ({ ...s, [c.id]: !s[c.id] }))}
                           aria-pressed={active}
-                          className={`rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
+                          className={`rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
                             active
-                              ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200'
-                              : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                              ? 'border-iris bg-iris/10 text-iris-soft'
+                              : 'border-line text-mut hover:border-line2'
                           }`}
                           title={meta ? `Max ${meta.maxLength} chars` : undefined}
                         >
-                          {meta?.icon} {c.name}
+                          <ProviderMark id={c.provider} name={meta?.name ?? c.provider} color={meta?.color} size={18} />
+                          {c.name}
                           {meta && <span className="ml-1.5 text-xs opacity-60">{meta.maxLength}</span>}
                         </button>
                       );
@@ -465,16 +469,17 @@ function ComposeInner() {
                     if (!c) return null;
                     const meta = providers[c.provider];
                     return (
-                      <div key={cid} className="rounded-lg border border-slate-800">
+                      <div key={cid} className="rounded-lg border border-line">
                         <button
                           onClick={() => setOverrideOpen((o) => ({ ...o, [cid]: !o[cid] }))}
                           aria-expanded={!!overrideOpen[cid]}
-                          className="flex w-full items-center justify-between px-3 py-2 text-xs text-slate-400 hover:text-slate-200"
+                          className="flex w-full items-center justify-between px-3 py-2 text-xs text-mut hover:text-fg"
                         >
-                          <span>
-                            {meta?.icon} Override content for {c.name}
+                          <span className="flex items-center gap-2">
+                            <ProviderMark id={c.provider} name={meta?.name ?? c.provider} color={meta?.color} size={16} />
+                            Override content for {c.name}
                           </span>
-                          <span aria-hidden>{overrideOpen[cid] ? '▲' : '▼'}</span>
+                          <span aria-hidden className="text-dim">{overrideOpen[cid] ? '−' : '+'}</span>
                         </button>
                         {overrideOpen[cid] && (
                           <textarea
@@ -495,34 +500,35 @@ function ComposeInner() {
             {/* Follow-ups (thread) */}
             <div className={cardCls}>
               <div className="mb-1 flex items-center justify-between">
-                <label className="text-sm font-medium text-slate-300">Follow-ups</label>
+                <label className="text-sm font-medium text-fg">Follow-ups</label>
                 <button
                   onClick={() => setComments((c) => [...c, { content: '', delayMin: 5 }])}
-                  className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised"
                 >
-                  ＋ Add follow-up
+                  <PlusIcon size={12} />
+                  Add follow-up
                 </button>
               </div>
-              <p className="mb-3 text-xs text-slate-500">
+              <p className="mb-3 text-xs text-dim">
                 Posted as threaded replies after the main post, each delayed by the minutes you set.
               </p>
               {comments.length > 0 && noReplyChannels.length > 0 && (
-                <p className="mb-3 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
-                  ⚠️ Follow-ups only post on channels that support replies. Ignored on:{' '}
+                <p className="mb-3 flex items-start gap-2 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">
+                  Follow-ups only post on channels that support replies. Ignored on:{' '}
                   {noReplyChannels.map((c) => c.name).join(', ')}.
                 </p>
               )}
               <div className="space-y-3">
                 {comments.map((c, i) => (
-                  <div key={i} className="rounded-lg border border-slate-800 p-3">
-                    <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                  <div key={i} className="rounded-lg border border-line p-3">
+                    <div className="mb-2 flex items-center justify-between text-xs text-dim">
                       <span>Reply {i + 1}</span>
                       <button
                         onClick={() => setComments((all) => all.filter((_, j) => j !== i))}
                         aria-label={`Remove follow-up ${i + 1}`}
-                        className="text-slate-500 hover:text-red-300"
+                        className="text-dim transition-colors hover:text-err"
                       >
-                        ✕
+                        <XIcon size={13} />
                       </button>
                     </div>
                     <textarea
@@ -534,7 +540,7 @@ function ComposeInner() {
                       className={inputCls}
                       placeholder="Follow-up content…"
                     />
-                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                    <label className="mt-2 flex items-center gap-2 text-xs text-dim">
                       Delay
                       <input
                         type="number"
@@ -543,7 +549,7 @@ function ComposeInner() {
                         onChange={(e) =>
                           setComments((all) => all.map((x, j) => (j === i ? { ...x, delayMin: Number(e.target.value) } : x)))
                         }
-                        className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                        className="w-20 rounded-lg border border-line bg-surface px-2 py-1 text-xs text-fg focus:border-iris focus:outline-none"
                       />
                       minutes after previous
                     </label>
@@ -554,7 +560,7 @@ function ComposeInner() {
 
             {/* Media */}
             <div className={cardCls}>
-              <label className="mb-3 block text-sm font-medium text-slate-300">Media</label>
+              <label className="mb-3 block text-sm font-medium text-fg">Media</label>
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -573,7 +579,7 @@ function ComposeInner() {
                   if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click();
                 }}
                 className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm transition ${
-                  dragOver ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300' : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                  dragOver ? 'border-iris bg-iris/5 text-iris-soft' : 'border-line text-dim hover:border-line2'
                 }`}
               >
                 Drag & drop images or videos here, or click to browse (max 50MB)
@@ -602,7 +608,8 @@ function ComposeInner() {
                   {urlBusy ? 'Importing…' : 'From URL'}
                 </button>
                 <button onClick={() => setLibraryOpen(true)} className={btnGhost}>
-                  🖼️ Library
+                  <ImageIcon size={14} />
+                  Library
                 </button>
               </div>
               {media.length > 0 && (
@@ -614,17 +621,17 @@ function ComposeInner() {
                         <img
                           src={`/api/media/${id}`}
                           alt="upload"
-                          className="h-20 w-20 rounded-lg border border-slate-700 object-cover"
+                          className="h-20 w-20 rounded-lg border border-line object-cover"
                         />
                       ) : (
-                        <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-2xl">
-                          🎬
+                        <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-line bg-raised text-dim">
+                          <FilmIcon size={20} />
                         </div>
                       )}
                       <button
                         onClick={() => setMedia((m) => m.filter((x) => x !== id))}
                         aria-label="Remove media"
-                        className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white group-hover:flex"
+                        className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-err text-xs text-fg group-hover:flex"
                       >
                         ×
                       </button>
@@ -636,7 +643,7 @@ function ComposeInner() {
 
             {/* Tags */}
             <div className={cardCls}>
-              <label htmlFor="tag-input" className="mb-2 block text-sm font-medium text-slate-300">
+              <label htmlFor="tag-input" className="mb-2 block text-sm font-medium text-fg">
                 Tags
               </label>
               <div className="flex flex-wrap items-center gap-2">
@@ -660,15 +667,15 @@ function ComposeInner() {
                     }
                   }}
                   placeholder={tags.length === 0 ? 'Add tags, press Enter…' : ''}
-                  className="min-w-32 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                  className="min-w-32 flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-fg placeholder:text-dim focus:border-iris focus:outline-none"
                 />
               </div>
-              <p className="mt-2 text-xs text-slate-500">Organize posts and filter them in the queue and calendar.</p>
+              <p className="mt-2 text-xs text-dim">Organize posts and filter them in the queue and calendar.</p>
             </div>
 
             {/* Schedule */}
             <div className={cardCls}>
-              <label htmlFor="schedule-at" className="mb-2 block text-sm font-medium text-slate-300">
+              <label htmlFor="schedule-at" className="mb-2 block text-sm font-medium text-fg">
                 Schedule for
               </label>
               <div className="flex flex-wrap items-center gap-2">
@@ -683,7 +690,8 @@ function ComposeInner() {
                   className={`${inputCls} max-w-xs`}
                 />
                 <button onClick={() => void fetchBestTime()} disabled={bestBusy} className={btnGhost}>
-                  {bestBusy ? '⏱ Finding…' : '⏱ Best time'}
+                  <ClockIcon size={14} className="text-iris-soft" />
+                  {bestBusy ? 'Finding…' : 'Best time'}
                 </button>
               </div>
               {bestSlots && (
@@ -695,7 +703,7 @@ function ComposeInner() {
                         setWhen(toLocalInput(s));
                         setBestSlots(null);
                       }}
-                      className="rounded-full border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs text-indigo-200 hover:border-indigo-500"
+                      className="rounded-full border border-iris/30 bg-iris/10 px-3 py-1.5 text-xs text-iris-soft hover:border-iris"
                     >
                       {formatDate(s)}
                     </button>
@@ -705,7 +713,7 @@ function ComposeInner() {
 
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="repeat" className="mb-1 block text-xs font-medium text-slate-400">
+                  <label htmlFor="repeat" className="mb-1 block text-xs font-medium text-mut">
                     Repeat
                   </label>
                   <select
@@ -720,7 +728,7 @@ function ComposeInner() {
                     <option value="custom">Custom…</option>
                   </select>
                   {repeat === 'custom' && (
-                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                    <label className="mt-2 flex items-center gap-2 text-xs text-dim">
                       Every
                       <input
                         type="number"
@@ -728,16 +736,19 @@ function ComposeInner() {
                         max={365}
                         value={customDays}
                         onChange={(e) => setCustomDays(e.target.value)}
-                        className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                        className="w-20 rounded-lg border border-line bg-surface px-2 py-1 text-xs text-fg focus:border-iris focus:outline-none"
                       />
                       days
                     </label>
                   )}
                 </div>
                 {user?.signature_enabled && user.signature && (
-                  <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-                    <p className="text-xs font-medium text-slate-400">✍️ Signature appended on publish</p>
-                    <p className="mt-1 truncate text-xs text-slate-500" title={user.signature}>
+                  <div className="rounded-lg border border-line bg-raised/50 p-3">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-mut">
+                      <PenIcon size={12} className="text-iris-soft" />
+                      Signature appended on publish
+                    </p>
+                    <p className="mt-1 truncate text-xs text-dim" title={user.signature}>
                       “{user.signature}”
                     </p>
                   </div>
@@ -758,13 +769,13 @@ function ComposeInner() {
           {/* ── Right: live previews ─────────────────────────────────── */}
           <div className="min-w-0">
             <div className="space-y-4 lg:sticky lg:top-6">
-              <h2 className="text-sm font-medium text-slate-300">Live preview</h2>
+              <h2 className="text-sm font-medium text-fg">Live preview</h2>
               {selectedIds.length === 0 ? (
                 <div className={`${cardCls} py-10 text-center`}>
-                  <div className="text-3xl" aria-hidden>
-                    👀
+                  <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-raised/50 text-dim">
+                    <EyeIcon size={18} />
                   </div>
-                  <p className="mt-2 text-sm text-slate-400">Select channels to see per-platform previews.</p>
+                  <p className="mt-2 text-sm text-mut">Select channels to see per-platform previews.</p>
                 </div>
               ) : (
                 channels
@@ -777,15 +788,16 @@ function ComposeInner() {
                     return (
                       <div key={c.id}>
                         <div className="mb-1.5 flex items-center justify-between text-xs">
-                          <span className="font-medium text-slate-400">
-                            {meta?.icon} {c.name}
+                          <span className="flex items-center gap-2 font-medium text-mut">
+                            <ProviderMark id={c.provider} name={meta?.name ?? c.provider} color={meta?.color} size={16} />
+                            {c.name}
                             {(overrides[c.id] ?? '').trim() && (
-                              <span className="ml-2 rounded-full bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+                              <span className="ml-2 rounded-full bg-raised px-1.5 py-0.5 text-[10px] text-mut">
                                 override
                               </span>
                             )}
                           </span>
-                          <span className={over ? 'font-semibold text-red-400' : 'text-slate-500'}>
+                          <span className={over ? 'font-semibold text-err' : 'text-dim'}>
                             {text.length}
                             {max !== undefined ? ` / ${max}` : ''}
                           </span>
@@ -818,7 +830,7 @@ export default function ComposePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading…</div>
+        <div className="flex min-h-screen items-center justify-center text-sm text-dim">Loading…</div>
       }
     >
       <ComposeInner />

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
+import { FilmIcon, ImageIcon, UploadIcon } from '@/components/icons';
 import { btnGhost, cardCls, EmptyState, ErrorBanner, inputCls, Skeleton } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { MediaListItemDTO } from '@/lib/types';
@@ -88,7 +89,8 @@ export default function LibraryPage() {
         <div className={cardCls}>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => fileInput.current?.click()} className={btnGhost}>
-              ⬆️ Upload file
+              <UploadIcon size={14} />
+              Upload file
             </button>
             <input
               ref={fileInput}
@@ -125,12 +127,13 @@ export default function LibraryPage() {
           </div>
         ) : items.length === 0 ? (
           <EmptyState
-            icon="🖼️"
+            icon={<ImageIcon size={18} />}
             title="Your library is empty"
             hint="Upload images or videos once, reuse them across posts."
             action={
               <button onClick={() => fileInput.current?.click()} className={btnGhost}>
-                ⬆️ Upload your first file
+                <UploadIcon size={14} />
+                Upload your first file
               </button>
             }
           />
@@ -139,26 +142,26 @@ export default function LibraryPage() {
             {items.map((m) => (
               <div
                 key={m.id}
-                className="group overflow-hidden rounded-xl border border-slate-800 bg-slate-900/50 transition hover:border-slate-600"
+                className="group overflow-hidden rounded-xl border border-line bg-surface transition hover:border-line2"
               >
                 <div className="relative aspect-square">
                   {m.mime.startsWith('image/') ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={`/api/media/${m.id}`} alt={m.name} className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-slate-800 text-4xl">🎬</div>
+                    <div className="flex h-full w-full items-center justify-center bg-raised text-dim"><FilmIcon size={26} /></div>
                   )}
                   <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/60 opacity-0 transition group-hover:opacity-100">
                     <button
                       onClick={() => useInComposer(m.id)}
-                      className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                      className="rounded-lg bg-iris px-3 py-1.5 text-xs font-medium text-fg hover:bg-iris-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris-soft"
                       aria-label={`Use ${m.name} in composer`}
                     >
                       Use in composer
                     </button>
                     <button
                       onClick={() => void remove(m)}
-                      className="rounded-lg border border-red-900 bg-red-950/80 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                      className="rounded-lg border border-err/25 bg-err/15 px-3 py-1.5 text-xs text-err hover:bg-err/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-err"
                       aria-label={`Delete ${m.name}`}
                     >
                       Delete
@@ -166,10 +169,10 @@ export default function LibraryPage() {
                   </div>
                 </div>
                 <div className="px-3 py-2">
-                  <p className="truncate text-xs text-slate-300" title={m.name}>
+                  <p className="truncate text-xs text-fg" title={m.name}>
                     {m.name}
                   </p>
-                  <p className="text-[10px] text-slate-600">
+                  <p className="text-[10px] text-dim">
                     {fmtSize(m.size)} · {formatDate(m.created_at)}
                   </p>
                 </div>

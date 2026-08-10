@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
+import { CommentIcon, EyeIcon, ExternalIcon, HeartIcon, PenIcon, RefreshIcon, RepostIcon, StackIcon } from '@/components/icons';
 import { Badge, btnDanger, btnGhost, cardCls, EmptyState, ErrorBanner, selectCls, SkeletonCards, TagChip } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PostDTO, TargetDTO } from '@/lib/types';
@@ -16,14 +17,23 @@ const TABS = [
 ] as const;
 
 function StatRow({ stats }: { stats: Record<string, number> }) {
-  const parts: string[] = [];
-  if (stats.likes) parts.push(`❤️ ${stats.likes}`);
-  if (stats.reposts) parts.push(`🔁 ${stats.reposts}`);
-  if (stats.replies) parts.push(`💬 ${stats.replies}`);
-  if (stats.comments && !stats.replies) parts.push(`💬 ${stats.comments}`);
-  if (stats.views) parts.push(`👁 ${stats.views}`);
-  if (parts.length === 0) return null;
-  return <span className="whitespace-nowrap text-slate-500">{parts.join('  ')}</span>;
+  const items: { Icon: typeof HeartIcon; n: number }[] = [];
+  if (stats.likes) items.push({ Icon: HeartIcon, n: stats.likes });
+  if (stats.reposts) items.push({ Icon: RepostIcon, n: stats.reposts });
+  if (stats.replies) items.push({ Icon: CommentIcon, n: stats.replies });
+  if (stats.comments && !stats.replies) items.push({ Icon: CommentIcon, n: stats.comments });
+  if (stats.views) items.push({ Icon: EyeIcon, n: stats.views });
+  if (items.length === 0) return null;
+  return (
+    <span className="inline-flex items-center gap-2.5 whitespace-nowrap text-dim">
+      {items.map(({ Icon, n }, i) => (
+        <span key={i} className="inline-flex items-center gap-1 font-mono text-[11px]">
+          <Icon size={11} />
+          {n}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function TargetStats({ t }: { t: TargetDTO }) {
@@ -96,7 +106,7 @@ function QueueInner() {
     <Portal title="Queue">
       <div className="mx-auto max-w-4xl space-y-5">
         <ErrorBanner message={error} />
-        <div className="flex gap-1 rounded-xl border border-slate-800 bg-slate-900/50 p-1" role="tablist">
+        <div className="flex gap-1 rounded-xl border border-line bg-surface p-1" role="tablist">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -104,7 +114,7 @@ function QueueInner() {
               aria-selected={tab === t.key}
               onClick={() => setTab(t.key)}
               className={`flex-1 rounded-lg px-3 py-2 text-sm ${
-                tab === t.key ? 'bg-indigo-600 font-medium text-white' : 'text-slate-400 hover:text-slate-200'
+                tab === t.key ? 'bg-iris font-medium text-fg' : 'text-mut hover:text-fg'
               }`}
             >
               {t.label}
@@ -143,7 +153,7 @@ function QueueInner() {
             <option value="">All channels</option>
             {channels.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.provider_meta?.icon} {c.name}
+                {c.name}
               </option>
             ))}
           </select>
@@ -154,7 +164,7 @@ function QueueInner() {
                 setTagFilter('');
                 setChannelFilter('');
               }}
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-dim hover:text-fg"
             >
               Clear
             </button>
@@ -165,13 +175,14 @@ function QueueInner() {
           <SkeletonCards count={3} height="h-28" />
         ) : visible.length === 0 ? (
           <EmptyState
-            icon="📭"
+            icon={<StackIcon size={18} />}
             title={posts.length === 0 ? 'Nothing here yet' : 'No posts match your filters'}
             hint={posts.length === 0 ? 'Compose a post and it will show up in your queue.' : 'Try clearing the filters above.'}
             action={
               posts.length === 0 ? (
                 <button onClick={() => router.push('/compose')} className={btnGhost}>
-                  ✍️ Compose a post
+                  <PenIcon size={14} />
+                  Compose a post
                 </button>
               ) : undefined
             }
@@ -182,18 +193,20 @@ function QueueInner() {
               <div key={p.id} className={cardCls}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <p className="whitespace-pre-wrap text-sm text-slate-200">{p.content || '(media only)'}</p>
-                    <p className="mt-1.5 text-xs text-slate-500">
+                    <p className="whitespace-pre-wrap text-sm text-fg">{p.content || '(media only)'}</p>
+                    <p className="mt-1.5 text-xs text-dim">
                       {p.status === 'scheduled' ? `Scheduled for ${formatDate(p.scheduled_at)}` : `Updated ${formatDate(p.updated_at)}`}
                       {p.media.length > 0 && ` · ${p.media.length} media`}
                       {p.repeat_every_days && (
-                        <span className="ml-1.5 inline-block rounded-full border border-emerald-900 bg-emerald-950/50 px-1.5 py-0.5 text-[10px] text-emerald-300">
-                          ♻️ every {p.repeat_every_days}d
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-1.5 py-0.5 font-mono text-[10px] text-ok">
+                          <RefreshIcon size={9} />
+                          every {p.repeat_every_days}d
                         </span>
                       )}
                       {p.comments.length > 0 && (
-                        <span className="ml-1.5 inline-block rounded-full border border-slate-700 bg-slate-800/60 px-1.5 py-0.5 text-[10px] text-slate-400">
-                          🧵 {p.comments.length} follow-up{p.comments.length > 1 ? 's' : ''}
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-line bg-raised/60 px-1.5 py-0.5 font-mono text-[10px] text-mut">
+                          <StackIcon size={9} />
+                          {p.comments.length} follow-up{p.comments.length > 1 ? 's' : ''}
                         </span>
                       )}
                     </p>
@@ -209,32 +222,33 @@ function QueueInner() {
                 </div>
 
                 {p.targets.length > 0 && (
-                  <ul className="mt-3 space-y-2 border-t border-slate-800 pt-3">
+                  <ul className="mt-3 space-y-2 border-t border-line pt-3">
                     {p.targets.map((t) => (
                       <li key={t.id} className="flex items-center justify-between gap-3 text-xs">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <Badge status={t.status} />
-                          <span className="text-slate-400">{t.channel_name ?? t.provider ?? 'deleted channel'}</span>
+                          <span className="text-mut">{t.channel_name ?? t.provider ?? 'deleted channel'}</span>
                           <TargetStats t={t} />
                           {t.external_url && (
                             <a
                               href={t.external_url}
                               target="_blank"
                               rel="noreferrer"
-                              className="truncate text-indigo-400 hover:text-indigo-300"
+                              className="inline-flex items-center gap-1 truncate text-iris-soft transition-colors hover:text-iris"
                             >
-                              view post ↗
+                              view post
+                              <ExternalIcon size={11} />
                             </a>
                           )}
                         </div>
                         {t.status === 'failed' && (
                           <div className="flex items-center gap-2">
-                            <span className="max-w-xs truncate text-red-400" title={t.error ?? ''}>
+                            <span className="max-w-xs truncate text-err" title={t.error ?? ''}>
                               {t.error}
                             </span>
                             <button
                               onClick={() => void act(() => api(`/api/targets/${t.id}/retry`, { method: 'POST' }), 'Retry queued')}
-                              className="rounded-lg border border-amber-800 px-2.5 py-1 text-amber-300 hover:bg-amber-950"
+                              className="rounded-lg border border-warn/30 px-2.5 py-1 text-warn hover:bg-warn/10"
                             >
                               Retry
                             </button>
@@ -245,7 +259,7 @@ function QueueInner() {
                   </ul>
                 )}
 
-                <div className="mt-3 flex gap-2 border-t border-slate-800 pt-3">
+                <div className="mt-3 flex gap-2 border-t border-line pt-3">
                   {(p.status === 'scheduled' || p.status === 'draft') && (
                     <button onClick={() => router.push(`/compose?post=${p.id}`)} className={btnGhost}>
                       Edit
@@ -283,7 +297,7 @@ export default function QueuePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading…</div>
+        <div className="flex min-h-screen items-center justify-center text-sm text-dim">Loading…</div>
       }
     >
       <QueueInner />
