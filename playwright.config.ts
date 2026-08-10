@@ -3,7 +3,9 @@ import { defineConfig } from '@playwright/test';
 // Runs against a locally-started instance (see README / PHASE3 runbook):
 //   docker compose up -d --wait
 //   PORT=3220 DATABASE_URL=postgres://postivo:postivo@localhost:5432/postivo \
-//     SSRF_ALLOW_HOSTS=localhost,127.0.0.1 npm run start
+//     npm run start
+// (.env provides SSRF_ALLOW_HOSTS=localhost — whitelisting 127.0.0.1 too would
+//  defeat the provider-SSRF hardening test.)
 //   npm run test:e2e
 export default defineConfig({
   testDir: './tests',

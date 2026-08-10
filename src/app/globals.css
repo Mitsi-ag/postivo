@@ -18,7 +18,7 @@
 
   --color-fg: #e6e9f0;
   --color-mut: #9aa3b5;
-  --color-dim: #5d6679;
+  --color-dim: #78829a; /* WCAG AA 5.2:1 on --color-ink (was #5d6679 @ 3.47:1) */
 
   --color-iris: #6e6bf0;
   --color-iris-deep: #5b58e8;
