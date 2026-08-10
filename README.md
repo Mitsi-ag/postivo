@@ -193,7 +193,11 @@ See [.env.example](./.env.example).
 | `STRIPE_SECRET_KEY` | — | Enables Stripe billing |
 | `STRIPE_PRICE_PRO` | — | Recurring Stripe price id for Pro |
 | `STRIPE_WEBHOOK_SECRET` | — | Webhook signature verification |
-| `APP_URL` | `http://localhost:3000` | Base URL for Stripe redirects |
+| `APP_URL` | `http://localhost:3000` | Base URL for Stripe redirects and email links |
+| `EMAIL_ENABLED` | `false` | `true` → send real transactional email via SES v2; unset → log `[mail] would send: …` and succeed |
+| `EMAIL_FROM` | — | Verified sender identity, e.g. `Postivo <hello@postivo.keenshift.ai>` |
+| `AWS_REGION` | `us-east-1` (S3) / `ap-southeast-2` (SES) | AWS region; SES uses `email.<region>.amazonaws.com` |
+| `E2E_TOKENS` | — | Test-only: expose raw reset/verify tokens in response headers (ignored in production builds) |
 | `OPENAI_API_KEY` | — | Enables real AI captions (Pro plan only) |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Any OpenAI-compatible endpoint |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Caption model |
@@ -228,6 +232,12 @@ See [.env.example](./.env.example).
 - Media reads are owner-checked and path-traversal safe (strict id validation).
 - Auth endpoints are rate-limited; responses carry `X-Frame-Options`, `X-Content-Type-Options`
   and `Referrer-Policy` security headers.
+- Transactional email (welcome / verify / password reset) goes through SES v2 with hand-rolled
+  SigV4 (`src/lib/mailer.ts`, no extra deps). Reset/verify tokens are stored as SHA-256 hashes,
+  single-use, and expire (1h reset, 24h verify). `POST /api/auth/forgot` always answers
+  `200 { ok: true }` — no account enumeration. A successful password reset revokes **all**
+  sessions and issues a fresh one. Outbound mail is capped at 5/min per recipient, and email
+  failures never block auth flows.
 - Session cookies are `Secure` when the request arrives over TLS (`x-forwarded-proto: https`).
 - SSRF guard (`src/lib/ssrf.ts`): every server-side outbound fetch goes through
   `guardedFetch` (all providers, RSS, media import, outbound webhooks) — URLs are DNS-resolved
@@ -254,10 +264,11 @@ bash scripts/smoke-phase1.sh # phase-1 feature verification (threads/recurring/R
 ## Testing
 
 ```bash
-# Start a production instance for tests (SSRF_ALLOW_HOSTS lets the local
-# static-file fixtures in smoke-phase1/e2e use localhost URLs):
+# Start a dev instance for tests (SSRF_ALLOW_HOSTS lets the local
+# static-file fixtures in smoke-phase1/e2e use localhost URLs; E2E_TOKENS arms
+# the test-only token headers used by the email specs):
 PORT=3220 DATABASE_URL=postgres://postivo:postivo@localhost:5432/postivo \
-  SSRF_ALLOW_HOSTS=localhost npm run start
+  SSRF_ALLOW_HOSTS=localhost E2E_TOKENS=1 npm run dev
 
 npm run test:e2e             # Playwright suite (e2e + security + scenarios + hardening + mobile), BASE_URL env to override
 bash scripts/load.sh         # load test: 20 concurrent users + 500x health (PORT env to override)
