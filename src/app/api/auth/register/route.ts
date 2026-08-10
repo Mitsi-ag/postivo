@@ -2,7 +2,9 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { attachSession, hashPassword, publicUser } from '@/lib/auth';
 import { one, query, type User } from '@/lib/db';
+import { renderVerifyEmail, renderWelcomeEmail, sendMail } from '@/lib/mailer';
 import { clientIp, rateLimit } from '@/lib/ratelimit';
+import { appUrl, generateToken, testTokensEnabled } from '@/lib/tokens';
 
 interface RegisterBody {
   email?: string;
@@ -41,5 +43,23 @@ export async function POST(req: NextRequest) {
   const user = await one<User>('SELECT * FROM users WHERE id = $1', [id]);
   const res = NextResponse.json({ user: publicUser(user as User) });
   await attachSession(res, id, req);
+  // Transactional email — strictly fire-and-forget: delivery failures must
+  // never fail or delay registration.
+  try {
+    const { token, hash } = generateToken();
+    await query('INSERT INTO email_verifications (id, user_id, token_hash, expires_at) VALUES ($1,$2,$3,$4)', [
+      crypto.randomUUID(),
+      id,
+      hash,
+      new Date(Date.now() + 24 * 3_600_000), // 24 hours
+    ]);
+    const tpl = renderVerifyEmail({ verifyUrl: `${appUrl()}/verify-email?token=${token}` });
+    void sendMail({ to: email, ...tpl }).catch((err) => console.warn('[mail] verify send error:', err));
+    if (testTokensEnabled()) res.headers.set('x-test-verify-token', token);
+  } catch (err) {
+    console.warn('[auth] verification email error:', err);
+  }
+  const welcome = renderWelcomeEmail({ name: (user as User).name, dashboardUrl: `${appUrl()}/dashboard` });
+  void sendMail({ to: email, ...welcome }).catch((err) => console.warn('[mail] welcome send error:', err));
   return res;
 }
