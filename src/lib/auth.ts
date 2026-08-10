@@ -150,6 +150,7 @@ export function publicUser(u: User): PublicUser {
     signature: u.signature ?? '',
     signature_enabled: u.signature_enabled === true,
     outbound_webhook_url: u.outbound_webhook_url ?? null,
+    email_verified: !!u.email_verified_at,
     created_at: u.created_at,
   };
 }

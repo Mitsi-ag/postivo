@@ -33,6 +33,7 @@ export interface User {
   signature: string;
   signature_enabled: boolean;
   outbound_webhook_url: string | null;
+  email_verified_at: string | null;
   created_at: string;
 }
 
@@ -44,6 +45,24 @@ export interface ApiKey {
   key_prefix: string;
   created_at: string;
   last_used_at: string | null;
+}
+
+export interface PasswordReset {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+export interface EmailVerification {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  verified_at: string | null;
+  created_at: string;
 }
 
 export interface Session {
@@ -251,6 +270,26 @@ const SCHEMA = `
     next_retry_at timestamptz,
     published_at timestamptz
   );
+  -- Transactional email (password reset + verification)
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE IF NOT EXISTS email_verifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at timestamptz NOT NULL,
+    verified_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+  CREATE INDEX IF NOT EXISTS idx_email_verifications_user ON email_verifications(user_id);
   CREATE TABLE IF NOT EXISTS rss_feeds (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

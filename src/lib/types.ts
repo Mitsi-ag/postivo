@@ -10,6 +10,7 @@ export interface PublicUser {
   signature: string;
   signature_enabled: boolean;
   outbound_webhook_url: string | null;
+  email_verified: boolean;
   created_at: string;
 }
 
