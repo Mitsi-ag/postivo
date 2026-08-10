@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useRequireAuth } from '@/lib/useRequireAuth';
+import VerifyEmailBanner from '@/components/VerifyEmailBanner';
 import {
   BoltIcon,
   CalendarIcon,
@@ -134,7 +135,10 @@ export default function Portal({ title, children }: { title: string; children: R
             </button>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">
+          {!user.email_verified && <VerifyEmailBanner />}
+          {children}
+        </main>
       </div>
     </div>
   );
