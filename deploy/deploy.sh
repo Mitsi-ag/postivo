@@ -22,7 +22,7 @@ if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
   envsubst < "$(dirname "$0")/apprunner-service.json.tpl" > /tmp/apprunner-service.json
   aws apprunner create-service --cli-input-json file:///tmp/apprunner-service.json --region "$REGION"
 else
-  echo "==> Updating existing App Runner service $SERVICE_ARN…"
+  echo "==> Updating existing App Runner service ${SERVICE_ARN}…"
   aws apprunner update-service --service-arn "$SERVICE_ARN" --region "$REGION" \
     --source-configuration "ImageRepository={ImageIdentifier=${ECR_URI}:latest,ImageRepositoryType=ECR,ImageConfiguration={Port=3000}},AuthenticationConfiguration={AccessRoleArn=arn:aws:iam::${ACCOUNT_ID}:role/AppRunnerECRAccessRole},AutoDeploymentsEnabled=true"
 fi
