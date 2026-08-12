@@ -116,18 +116,20 @@ async function sendSes(msg: MailMessage, creds: AwsCreds): Promise<void> {
   const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const dateStamp = amzDate.slice(0, 8);
 
+  // SES v2 SendEmail is a REST/JSON endpoint: POST /v2/email/outbound-emails
+  // (NOT the JSON-RPC x-amz-target style — that returns UnknownOperationException).
+  const path = '/v2/email/outbound-emails';
   const headers: Record<string, string> = {
-    'content-type': 'application/x-amz-json-1.0',
+    'content-type': 'application/json',
     host,
     'x-amz-date': amzDate,
-    'x-amz-target': 'SimpleEmailServiceV2.SendEmail',
   };
   if (creds.sessionToken) headers['x-amz-security-token'] = creds.sessionToken;
 
   const signedHeaderKeys = Object.keys(headers).sort();
   const canonicalHeaders = signedHeaderKeys.map((k) => `${k}:${headers[k].trim()}\n`).join('');
   const signedHeaders = signedHeaderKeys.join(';');
-  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, sha256Hex(body)].join('\n');
+  const canonicalRequest = ['POST', path, '', canonicalHeaders, signedHeaders, sha256Hex(body)].join('\n');
 
   const scope = `${dateStamp}/${SES_REGION}/${SES_SERVICE}/aws4_request`;
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256Hex(canonicalRequest)].join('\n');
@@ -143,7 +145,7 @@ async function sendSes(msg: MailMessage, creds: AwsCreds): Promise<void> {
     `AWS4-HMAC-SHA256 Credential=${creds.accessKeyId}/${scope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
-  const res = await fetch(`https://${host}/`, {
+  const res = await fetch(`https://${host}${path}`, {
     method: 'POST',
     headers: { ...headers, authorization },
     body,

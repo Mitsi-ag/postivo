@@ -7,7 +7,7 @@ import Timeline from '@/components/Timeline';
 export const metadata: Metadata = {
   title: 'Postivo — Schedule everywhere. Self-host anywhere. One binary.',
   description:
-    'A radically simpler social media scheduler: 15 providers, threads, recurring posts, RSS automation, analytics and an agent-first API — in one stateless Next.js app.',
+    'A radically simpler social media scheduler: 18 providers, threads, recurring posts, RSS automation, analytics and an agent-first API — in one stateless Next.js app.',
 };
 
 const COMPARISON = [
@@ -188,12 +188,12 @@ export default function Landing() {
           sub="Without the six-container docker-compose file."
         />
         <div className="mt-14 grid gap-4 lg:grid-cols-12">
-          {/* Large: 15 providers */}
+          {/* Large: 18 providers */}
           <div className="edge-top lift rounded-card border border-line bg-surface p-7 lg:col-span-7">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-iris/25 bg-iris/10 text-iris-soft">
               <PlugIcon size={17} />
             </div>
-            <h3 className="mt-5 font-display text-lg font-semibold text-fg">15 providers, one composer</h3>
+            <h3 className="mt-5 font-display text-lg font-semibold text-fg">18 providers, one composer</h3>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-mut">
               Compose once, publish everywhere — with per-channel overrides and live per-platform
               previews that show exactly what ships.

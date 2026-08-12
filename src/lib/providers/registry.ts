@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Channel } from '../db';
-import { guardedFetch } from '../ssrf';
+import { guardedFetch, readBodyCapped } from '../ssrf';
 import type { ProviderField, ProviderMeta } from '../types';
 
 export interface PublishContext {
@@ -53,6 +53,10 @@ function bodyError(label: string, detail: string): Error {
 function firstLine(content: string, fallback = 'Untitled', max = 100): string {
   return (content.split('\n')[0] || fallback).slice(0, max) || fallback;
 }
+
+// YouTube re-downloads our own media for the resumable upload — cap it at the
+// same 50MB the upload route enforces so a huge object can't OOM the instance.
+const YOUTUBE_MAX_BYTES = 50 * 1024 * 1024;
 
 // ---------- Bluesky helpers ----------
 
@@ -659,6 +663,178 @@ export const providers: Provider[] = [
       if (!res.ok) throw await httpError('WordPress publish', res);
       const data = (await res.json()) as { id?: number; link?: string };
       return { externalId: data.id ? String(data.id) : undefined, externalUrl: data.link };
+    },
+  },
+  {
+    id: 'instagram',
+    name: 'Instagram',
+    icon: '📸',
+    color: '#e1306c',
+    maxLength: 2200,
+    supportsMedia: true,
+    fields: [
+      {
+        key: 'access_token',
+        label: 'Long-lived access token',
+        secret: true,
+        placeholder: 'Instagram Business/Creator via Facebook Login',
+      },
+      { key: 'ig_user_id', label: 'Instagram Business account ID', placeholder: '1784…' },
+    ],
+    async publish(_channel, creds, content, mediaUrls) {
+      if (!creds.access_token || !creds.ig_user_id) {
+        throw new Error('Instagram access token and Business account ID are required');
+      }
+      const media = mediaUrls[0];
+      // The Graph API has no text-only post — every publish is a media container.
+      if (!media) throw new Error('Instagram requires an image or video');
+      const graph = 'https://graph.facebook.com/v21.0';
+      const base = `${graph}/${encodeURIComponent(creds.ig_user_id)}`;
+      const isVideo = /\.(mp4|mov)(\?|$)/i.test(media);
+      const params = new URLSearchParams({ caption: content.slice(0, 2200), access_token: creds.access_token });
+      if (isVideo) {
+        params.set('media_type', 'REELS');
+        params.set('video_url', media);
+      } else {
+        params.set('image_url', media);
+      }
+      const create = await guardedFetch(`${base}/media`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: params,
+      });
+      if (!create.ok) throw await httpError('Instagram media container', create);
+      const container = ((await create.json()) as { id?: string }).id;
+      if (!container) throw new Error('Instagram media container returned no id');
+      // Media is processed asynchronously — poll the container until the Graph
+      // API reports it ready to publish (videos can take a while).
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        const status = await guardedFetch(
+          `${graph}/${encodeURIComponent(container)}?fields=status_code&access_token=${encodeURIComponent(creds.access_token)}`,
+        );
+        if (!status.ok) throw await httpError('Instagram container status', status);
+        const code = ((await status.json()) as { status_code?: string }).status_code;
+        if (code === 'FINISHED') break;
+        if (code === 'ERROR' || code === 'EXPIRED') throw bodyError('Instagram container status', code);
+        if (Date.now() > deadline) throw new Error('Instagram media processing timed out');
+        await new Promise((r) => setTimeout(r, 2_000));
+      }
+      const pub = await guardedFetch(`${base}/media_publish`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ creation_id: container, access_token: creds.access_token }),
+      });
+      if (!pub.ok) throw await httpError('Instagram media publish', pub);
+      const mediaId = ((await pub.json()) as { id?: string }).id;
+      // Best-effort permalink — nice for the publish log, not worth failing over.
+      let externalUrl: string | undefined;
+      if (mediaId) {
+        const link = await guardedFetch(
+          `${graph}/${encodeURIComponent(mediaId)}?fields=permalink&access_token=${encodeURIComponent(creds.access_token)}`,
+        ).catch(() => null);
+        if (link?.ok) externalUrl = ((await link.json()) as { permalink?: string }).permalink;
+      }
+      return { externalId: mediaId, externalUrl };
+    },
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok',
+    icon: '🎵',
+    color: '#25f4ee',
+    maxLength: 2200,
+    supportsMedia: true,
+    fields: [
+      {
+        key: 'access_token',
+        label: 'OAuth2 access token',
+        secret: true,
+        placeholder: 'video.upload scope (Content Posting API)',
+      },
+    ],
+    async publish(_channel, creds, content, mediaUrls) {
+      if (!creds.access_token) throw new Error('TikTok access token is required');
+      const video = mediaUrls[0];
+      // The Content Posting API video flow is the only direct-post path.
+      if (!video) throw new Error('TikTok requires a video');
+      const res = await guardedFetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${creds.access_token}`, 'content-type': 'application/json; charset=UTF-8' },
+        body: JSON.stringify({
+          post_info: { title: content.slice(0, 2200), privacy_level: 'PUBLIC_TO_EVERYONE' },
+          // TikTok pulls the video from our signed, expiring media URL.
+          source_info: { source: 'PULL_FROM_URL', video_url: video },
+        }),
+      });
+      if (!res.ok) throw await httpError('TikTok video init', res);
+      // TikTok reports API errors with HTTP 200 + an error.code payload.
+      const data = (await res.json()) as {
+        data?: { publish_id?: string };
+        error?: { code?: string; message?: string };
+      };
+      if (data.error?.code && data.error.code !== 'ok') {
+        throw bodyError('TikTok video init', data.error.message ?? data.error.code);
+      }
+      return { externalId: data.data?.publish_id };
+    },
+  },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    icon: '▶️',
+    color: '#ff0000',
+    maxLength: 5000,
+    supportsMedia: true,
+    fields: [
+      {
+        key: 'access_token',
+        label: 'OAuth2 access token',
+        secret: true,
+        placeholder: 'Requires the youtube.upload scope',
+      },
+    ],
+    async publish(_channel, creds, content, mediaUrls) {
+      if (!creds.access_token) throw new Error('YouTube access token is required');
+      const video = mediaUrls[0];
+      if (!video) throw new Error('YouTube requires a video');
+      // Resumable upload, step 1: open the session with the video metadata.
+      const init = await guardedFetch(
+        'https://upload.youtube.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${creds.access_token}`,
+            'content-type': 'application/json; charset=UTF-8',
+            'x-upload-content-type': 'video/*',
+          },
+          body: JSON.stringify({
+            snippet: { title: content.slice(0, 100).trim() || 'Postivo video', description: content.slice(0, 5000) },
+            status: { privacyStatus: 'public' },
+          }),
+        },
+      );
+      if (!init.ok) throw await httpError('YouTube upload init', init);
+      const sessionUri = init.headers.get('location');
+      if (!sessionUri) throw new Error('YouTube upload init returned no session URI');
+      // Step 2: pull the bytes back from our own signed media URL (the APP_URL
+      // host is exempted in ssrf.ts), then PUT them to the session URI.
+      const media = await guardedFetch(video);
+      if (!media.ok) throw await httpError('YouTube media download', media);
+      const bytes = await readBodyCapped(media, YOUTUBE_MAX_BYTES);
+      const contentType = (media.headers.get('content-type') ?? 'video/mp4').split(';')[0].trim();
+      const up = await guardedFetch(sessionUri, {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${creds.access_token}`,
+          'content-type': contentType,
+          'content-length': String(bytes.byteLength),
+        },
+        body: new Uint8Array(bytes),
+      });
+      if (!up.ok) throw await httpError('YouTube video upload', up);
+      const data = (await up.json()) as { id?: string };
+      return { externalId: data.id, externalUrl: data.id ? `https://youtu.be/${data.id}` : undefined };
     },
   },
 ];

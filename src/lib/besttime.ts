@@ -35,6 +35,15 @@ const SLOTS: Record<string, Slot[]> = {
   medium: [{ days: MIDWEEK, hours: [8, 9, 12] }],
   wordpress: [{ days: MIDWEEK, hours: [9, 10, 11] }],
   webhook: [{ days: WEEKDAYS, hours: [9, 10, 11] }],
+  instagram: [{ days: WEEKDAYS, hours: [11, 13, 19] }],
+  tiktok: [
+    { days: WEEKDAYS, hours: [12, 15, 19] },
+    { days: WEEKEND, hours: [10, 20] },
+  ],
+  youtube: [
+    { days: WEEKDAYS, hours: [14, 15, 16] },
+    { days: WEEKEND, hours: [9, 10, 11] },
+  ],
 };
 
 export function isValidTimezone(tz: string): boolean {

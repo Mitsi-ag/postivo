@@ -17,7 +17,8 @@ const BATCH_SIZE = 10;
 const CLAIM_TIMEOUT_MINUTES = 5;
 // Hard cap on any single provider publish — a hung provider must not hold a
 // claim hostage until the watchdog re-claims it (duplicate-publish window).
-const PUBLISH_TIMEOUT_MS = 30_000;
+// 90s: Instagram's two-step container flow polls up to ~60s for Reels.
+const PUBLISH_TIMEOUT_MS = 90_000;
 // RSS bodies are capped so a hostile feed can't OOM the instance.
 const RSS_MAX_BYTES = 5 * 1024 * 1024;
 

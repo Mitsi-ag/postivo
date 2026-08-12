@@ -311,6 +311,9 @@ const ABBR: Record<string, string> = {
   hashnode: 'HN',
   medium: 'MD',
   wordpress: 'WP',
+  instagram: 'IG',
+  tiktok: 'TT',
+  youtube: 'YT',
 };
 
 export function ProviderMark({

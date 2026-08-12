@@ -33,12 +33,16 @@ export default function SettingsPage() {
 
   const [error, setError] = useState<string | null>(null);
 
+  // Initialize the form from the loaded user exactly once. Without the guard,
+  // a late-arriving /api/auth/me response would clobber edits already typed.
+  const [profileInit, setProfileInit] = useState(false);
   useEffect(() => {
-    if (user) {
+    if (user && !profileInit) {
       setName(user.name);
       setTimezone(user.timezone);
+      setProfileInit(true);
     }
-  }, [user]);
+  }, [user, profileInit]);
 
   function loadKeys() {
     api<{ keys: ApiKeyDTO[] }>('/api/settings/keys')

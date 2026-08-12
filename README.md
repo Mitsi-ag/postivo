@@ -131,6 +131,9 @@ Point a Stripe webhook at `https://<app>/api/billing/webhook` for those two even
 | 👩‍💻 DEV | API key | dev.to Settings → Extensions → DEV Community API Keys. Publishes full articles. |
 | 𝕏 | OAuth2 user access token | Needs `tweet.write` scope (user context). |
 | 💼 LinkedIn | OAuth2 access token, person URN | `w_member_social` scope; URN looks like `urn:li:person:…`. |
+| 📸 Instagram | long-lived access token, Instagram Business account ID | Graph API (Business/Creator accounts via Facebook Login). Requires an image or video; `.mp4`/`.mov` publish as Reels. |
+| 🎵 TikTok | OAuth2 access token | Content Posting API (`video.upload` scope). Video only — TikTok pulls it from the signed media URL. |
+| ▶️ YouTube | OAuth2 access token | Needs the `youtube.upload` scope. Video only (resumable upload); publishes as public. |
 
 Unknown providers or missing credentials fail safely: the scheduler marks the target failed with a
 descriptive error, visible (and retryable) in the Queue.

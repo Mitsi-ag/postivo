@@ -8,6 +8,7 @@
 
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { appUrl } from './tokens';
 
 function allowHosts(): Set<string> {
   return new Set(
@@ -54,6 +55,15 @@ export async function assertPublicUrl(rawUrl: string): Promise<URL> {
   }
   const host = url.hostname.toLowerCase();
   if (allowHosts().has(host)) return url;
+  // Our own host is always allowed: providers pull media back from the signed
+  // APP_URL media URLs at publish time (e.g. the YouTube resumable upload),
+  // and APP_URL is operator-configured, never user input — even when it
+  // resolves to a private address (dev / single-box self-hosting).
+  try {
+    if (host === new URL(appUrl()).hostname.toLowerCase()) return url;
+  } catch {
+    // Misconfigured APP_URL — fall through to the normal checks.
+  }
   if (net.isIP(host)) {
     if (isPrivateIp(host)) {
       throw new Error(`Blocked URL: ${host} is a private or loopback address`);
