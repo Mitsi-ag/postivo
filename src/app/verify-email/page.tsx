@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Wordmark } from '@/components/icons';
 import { btnPrimary } from '@/components/ui';
 
@@ -11,8 +11,11 @@ type View = 'loading' | 'success' | 'invalid' | 'expired';
 function VerifyEmailInner() {
   const token = useSearchParams().get('token') ?? '';
   const [view, setView] = useState<View>('loading');
+  const started = useRef(false); // consume the token exactly once per mount
 
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     if (!token) {
       setView('invalid');
       return;
