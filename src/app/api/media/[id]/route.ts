@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { one, type MediaItem } from '@/lib/db';
 import { getMedia, deleteMedia } from '@/lib/storage';
+import { verifyMediaSignature } from '@/lib/mediaShare';
 import { query } from '@/lib/db';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -10,14 +11,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!/^[A-Za-z0-9-]+\.[a-z0-9]+$/.test(id)) {
     return NextResponse.json({ error: 'Invalid media id' }, { status: 400 });
   }
-  // Owner-only access.
-  const user = await getSessionUser(req);
-  if (!user) return unauthorized();
   const item = await one<MediaItem>('SELECT * FROM media WHERE id = $1', [id]);
-  if (!item || item.user_id !== user.id) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  // Two ways in: the owner's session (portal), or a valid HMAC-signed
+  // expiring URL (social providers fetching media at publish time).
+  const user = await getSessionUser(req);
+  if (user) {
+    if (!item || item.user_id !== user.id) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+  } else {
+    const exp = Number(req.nextUrl.searchParams.get('exp'));
+    const sig = req.nextUrl.searchParams.get('sig') ?? '';
+    if (!item || !sig || !verifyMediaSignature(id, exp, sig)) return unauthorized();
   }
-  const obj = await getMedia(user.id, id);
+  const obj = await getMedia(item!.user_id, id);
   if (!obj) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const headers: Record<string, string> = {
     'content-type': obj.contentType || item.mime || 'application/octet-stream',

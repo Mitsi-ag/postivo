@@ -17,7 +17,7 @@ export default function Support() {
             <li><strong className="text-fg">Connecting channels</strong> — Channels → Add channel, pick a provider, paste its token. Bluesky and Mastodon work with just an app password/token.</li>
             <li><strong className="text-fg">Failed posts</strong> — Queue → Failed shows the exact platform error; hit Retry after fixing credentials.</li>
             <li><strong className="text-fg">Billing</strong> — Settings → Billing to upgrade, manage, or cancel. Handled securely by Stripe.</li>
-            <li><strong className="text-fg">API access</strong> — Settings → API keys. Every core action is available via REST with a Bearer key.</li>
+            <li><strong className="text-fg">API access</strong> — Settings → API keys. Create, read, update and delete posts and list channels via REST with a Bearer key; the full OpenAPI 3.1 spec is at <code className="text-fg">/api/v1/openapi.json</code>.</li>
           </ul>
         </section>
       </div>

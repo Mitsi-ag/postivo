@@ -47,7 +47,13 @@ export function getSecret(): string {
     // fall through and generate
   }
   cachedSecret = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(file, cachedSecret, { mode: 0o600 });
+  try {
+    fs.writeFileSync(file, cachedSecret, { mode: 0o600 });
+  } catch {
+    // Read-only filesystem (serverless, some containers): the secret lives for
+    // this process only — sessions won't survive a restart. Acceptable for
+    // ephemeral dev; production must set JWT_SECRET.
+  }
   return cachedSecret;
 }
 

@@ -44,6 +44,8 @@ export async function DELETE(req: NextRequest) {
   await query('DELETE FROM rss_feeds WHERE user_id = $1', [user.id]);
   await query('DELETE FROM sets WHERE user_id = $1', [user.id]);
   await query('DELETE FROM media WHERE user_id = $1', [user.id]);
+  await query('DELETE FROM password_resets WHERE user_id = $1', [user.id]);
+  await query('DELETE FROM email_verifications WHERE user_id = $1', [user.id]);
   await query('DELETE FROM users WHERE id = $1', [user.id]);
 
   const res = NextResponse.json({ ok: true });

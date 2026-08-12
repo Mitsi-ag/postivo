@@ -75,14 +75,17 @@ PORT=3000 bash scripts/smoke.sh
 
 ## Plans
 
-| | Free | Pro ($12/mo) |
+| | Free | Pro ($9/mo) |
 |---|---|---|
 | Connected channels | 3 | 100 |
 | Scheduled posts / calendar month | 30 | 10,000 |
+| RSS feeds | 3 | 50 |
+| Media storage | 250 MB | 25 GB |
 | AI captions | — | ✓ |
 
-Limits are enforced server-side; exceeding them returns **HTTP 402 `{error, upgrade:true}`**
-and the UI shows an "Upgrade to Pro" banner linking to **Settings → Billing**.
+Limits are enforced server-side (including drafts that become scheduled via update);
+exceeding them returns **HTTP 402 `{error, upgrade:true}`** and the UI shows an
+"Upgrade to Pro" banner linking to **Settings → Billing**.
 
 ## Billing (Stripe, optional)
 
@@ -107,9 +110,10 @@ Point a Stripe webhook at `https://<app>/api/billing/webhook` for those two even
 
 - 📅 **Scheduling** — compose once, publish to many channels, per-channel content overrides
 - 📆 **Calendar & Queue** — month view, scheduled/published/failed/drafts tabs, one-click retry
-- 🖼️ **Media uploads** — images & video up to 50 MB, S3-backed in production
+- 🖼️ **Media uploads** — images & video up to 50 MB, S3-backed in production, per-plan storage quota;
+  providers receive media as **signed, expiring URLs** (HMAC, 24 h) so publishing works end-to-end
 - ✨ **AI captions** — OpenAI-compatible caption generation (Pro), or a built-in offline fallback
-- 🤖 **Agent API** — `pv_…` Bearer keys, `/api/v1/posts` + `/api/v1/channels`
+- 🤖 **Agent API** — `pv_…` Bearer keys, full CRUD on `/api/v1/posts` + `/api/v1/channels`, OpenAPI 3.1 spec
 - 📈 **Analytics** — publishes by provider, 14-day activity, publish log
 - 📦 **Export** — one-click JSON export of all your data
 - 🔁 **Reliable publishing** — scheduler claims due posts with `SKIP LOCKED` (multi-instance
@@ -257,9 +261,12 @@ docker compose up -d --wait  # Postgres for local dev
 npm run dev                  # dev server
 npm run build                # production build (standalone output)
 npm run start                # production server
+npm run typecheck            # tsc --noEmit
 bash scripts/smoke.sh        # end-to-end smoke test against a running server (PORT env to override)
 bash scripts/smoke-phase1.sh # phase-1 feature verification (threads/recurring/RSS/sets/uploads/v1 API)
 ```
+
+CI (`.github/workflows/ci.yml`) runs typecheck + build + the full Playwright suite on every push.
 
 ## Testing
 

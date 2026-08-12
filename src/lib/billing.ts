@@ -7,9 +7,8 @@ export function billingEnabled(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO);
 }
 
-export function appUrl(): string {
-  return (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
-}
+// Single source of truth for the app origin (also used by email token flows).
+export { appUrl } from './tokens';
 
 const g = globalThis as unknown as { __postivoStripe?: Stripe };
 

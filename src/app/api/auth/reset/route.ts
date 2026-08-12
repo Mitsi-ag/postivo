@@ -40,8 +40,8 @@ export async function POST(req: NextRequest) {
   if (!body?.token || !body.password) {
     return NextResponse.json({ error: 'token and password are required' }, { status: 400 });
   }
-  if (body.password.length < 8) {
-    return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+  if (body.password.length < 8 || body.password.length > 256) {
+    return NextResponse.json({ error: 'Password must be between 8 and 256 characters' }, { status: 400 });
   }
   const result = await lookup(body.token);
   if (result.error) return NextResponse.json(result.error, { status: 400 });

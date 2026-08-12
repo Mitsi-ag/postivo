@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, tooManyRequests, unauthorized } from '@/lib/auth';
 import { query } from '@/lib/db';
-import { renderVerifyEmail, sendMail } from '@/lib/mailer';
+import { renderVerifyEmail, sendMail, emailEnabled } from '@/lib/mailer';
 import { rateLimit } from '@/lib/ratelimit';
 import { appUrl, generateToken, testTokensEnabled } from '@/lib/tokens';
 
@@ -11,7 +11,7 @@ import { appUrl, generateToken, testTokensEnabled } from '@/lib/tokens';
 export async function POST(req: NextRequest) {
   const user = await getSessionUser(req);
   if (!user) return unauthorized();
-  const res = NextResponse.json({ ok: true });
+  const res = NextResponse.json({ ok: true, email_enabled: emailEnabled() });
   if (user.email_verified_at) return res; // already verified — nothing to do
   if (!rateLimit(`verify-resend:${user.id}`, 3, 10 * 60_000)) return tooManyRequests();
   try {

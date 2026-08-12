@@ -9,6 +9,7 @@ import { btnPrimary, inputCls } from '@/components/ui';
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -16,7 +17,8 @@ export default function ForgotPasswordPage() {
     setBusy(true);
     try {
       // Always 200 — the response never reveals whether the email exists.
-      await api('/api/auth/forgot', { method: 'POST', json: { email } });
+      const res = await api<{ ok: boolean; email_enabled?: boolean }>('/api/auth/forgot', { method: 'POST', json: { email } });
+      setEmailEnabled(res.email_enabled !== false);
       setSent(true);
     } catch {
       setSent(true); // keep the anti-enumeration UX even on network errors
@@ -44,6 +46,12 @@ export default function ForgotPasswordPage() {
                 If an account exists for <span className="text-fg">{email}</span>, we&apos;ve sent a password reset
                 link. It expires in 1 hour.
               </p>
+              {!emailEnabled && (
+                <p className="rounded-lg border border-line bg-bg/60 px-3 py-2 text-xs leading-relaxed text-dim">
+                  Heads up: this Postivo instance doesn&apos;t have email delivery configured, so no message was
+                  actually sent. Ask the administrator to set EMAIL_ENABLED/EMAIL_FROM, or contact support.
+                </p>
+              )}
               <Link href="/login" className={`${btnPrimary} w-full`}>
                 Back to log in
               </Link>

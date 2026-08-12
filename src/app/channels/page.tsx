@@ -11,6 +11,7 @@ export default function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelDTO[]>([]);
   const [providers, setProviders] = useState<ProviderMeta[]>([]);
   const [addingProvider, setAddingProvider] = useState<ProviderMeta | null>(null);
+  const [editingChannel, setEditingChannel] = useState<ChannelDTO | null>(null);
   const [name, setName] = useState('');
   const [form, setForm] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -33,9 +34,39 @@ export default function ChannelsPage() {
 
   function startAdd(p: ProviderMeta) {
     setAddingProvider(p);
+    setEditingChannel(null);
     setName('');
     setForm({});
     setError(null);
+  }
+
+  function startEdit(c: ChannelDTO) {
+    setEditingChannel(c);
+    setAddingProvider(null);
+    setName(c.name);
+    setForm({});
+    setError(null);
+  }
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingChannel) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Only non-empty fields are sent — blank fields keep their saved value.
+      const credentials = Object.fromEntries(Object.entries(form).filter(([, v]) => v.trim()));
+      await api(`/api/channels/${editingChannel.id}`, {
+        method: 'PATCH',
+        json: { name, ...(Object.keys(credentials).length ? { credentials } : {}) },
+      });
+      setEditingChannel(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update channel');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -99,6 +130,9 @@ export default function ChannelsPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <Badge status={c.status} />
+                    <button onClick={() => startEdit(c)} className={btnGhost}>
+                      Edit
+                    </button>
                     <button onClick={() => void remove(c.id)} className={btnDanger}>
                       Delete
                     </button>
@@ -106,6 +140,52 @@ export default function ChannelsPage() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {editingChannel?.provider_meta && (
+            <form onSubmit={submitEdit} className="mt-4 space-y-3 border-t border-line pt-4">
+              <p className="text-sm text-mut">
+                Edit <span className="font-medium text-fg">{editingChannel.name}</span>
+                {editingChannel.status === 'error' && (
+                  <span className="text-err"> — publishing failed; update the credentials to reactivate it.</span>
+                )}
+              </p>
+              <div>
+                <label htmlFor="edit-channel-name" className="mb-1 block text-xs font-medium text-mut">Display name</label>
+                <input
+                  id="edit-channel-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className={inputCls}
+                  required
+                />
+              </div>
+              {editingChannel.provider_meta.fields.map((f) => (
+                <div key={f.key}>
+                  <label htmlFor={`edit-field-${f.key}`} className="mb-1 block text-xs font-medium text-mut">
+                    {f.label}
+                    <span className="text-dim"> (leave blank to keep current)</span>
+                  </label>
+                  <input
+                    id={`edit-field-${f.key}`}
+                    type={f.secret ? 'password' : 'text'}
+                    value={form[f.key] ?? ''}
+                    onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
+                    className={inputCls}
+                    placeholder={f.placeholder}
+                    autoComplete="off"
+                  />
+                </div>
+              ))}
+              <div className="flex gap-3 pt-1">
+                <button type="submit" disabled={busy} className={btnPrimary}>
+                  {busy ? 'Saving…' : 'Save changes'}
+                </button>
+                <button type="button" onClick={() => setEditingChannel(null)} className={btnGhost}>
+                  Cancel
+                </button>
+              </div>
+            </form>
           )}
         </div>
 

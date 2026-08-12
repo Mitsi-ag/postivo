@@ -17,8 +17,8 @@ export async function POST(req: NextRequest) {
   if (!verifyPassword(body.current, user.password_hash)) {
     return NextResponse.json({ error: 'Current password is incorrect' }, { status: 403 });
   }
-  if (body.next.length < 8) {
-    return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 });
+  if (body.next.length < 8 || body.next.length > 256) {
+    return NextResponse.json({ error: 'New password must be between 8 and 256 characters' }, { status: 400 });
   }
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(body.next), user.id]);
   // A password change kills every existing session (stolen cookies included),

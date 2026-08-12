@@ -5,6 +5,7 @@ import { query } from '@/lib/db';
 import { putMedia } from '@/lib/storage';
 import { BodyTooLargeError, guardedFetch, readBodyCapped } from '@/lib/ssrf';
 import { rateLimit } from '@/lib/ratelimit';
+import { planOf, storageUsed } from '@/lib/plans';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -56,6 +57,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Could not download the remote file' }, { status: 502 });
   }
   if (buffer.byteLength === 0) return NextResponse.json({ error: 'URL returned an empty body' }, { status: 400 });
+  // Cumulative per-plan storage quota (same rule as multipart uploads).
+  const storageLimit = planOf(user).storageMB * 1024 * 1024;
+  const storageNow = await storageUsed(user.id);
+  if (storageNow + buffer.byteLength > storageLimit) {
+    return NextResponse.json(
+      { error: `Storage full — your plan includes ${planOf(user).storageMB}MB of media. Delete some files or upgrade.`, upgrade: true },
+      { status: 402 },
+    );
+  }
 
   const urlName = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '').replace(/[^\w.-]/g, '').slice(0, 300);
   const ext = EXT_BY_MIME[mime] ?? (mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/g, '');

@@ -218,6 +218,28 @@ export function openApiSpec(): Record<string, unknown> {
             '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           },
         },
+        patch: {
+          operationId: 'updatePost',
+          summary: 'Update a post (content, schedule, channels, tags, status)',
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CreatePostRequest' } } },
+          },
+          responses: {
+            '200': {
+              description: 'Updated post',
+              content: {
+                'application/json': {
+                  schema: { type: 'object', properties: { post: { $ref: '#/components/schemas/Post' } } },
+                },
+              },
+            },
+            '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+            '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+            '402': { description: 'Plan limit reached', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+            '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          },
+        },
       },
       '/api/v1/openapi.json': {
         get: {

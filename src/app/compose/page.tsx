@@ -197,6 +197,15 @@ function ComposeInner() {
     [selectedIds, channels, providers],
   );
 
+  const noMediaChannels = useMemo(
+    () =>
+      selectedIds
+        .map((id) => channels.find((c) => c.id === id))
+        .filter((c): c is ChannelDTO => Boolean(c))
+        .filter((c) => providers[c.provider] && !providers[c.provider].supportsMedia),
+    [selectedIds, channels, providers],
+  );
+
   const repeatDays = repeat === '' ? null : repeat === 'custom' ? Number(customDays) || null : Number(repeat);
 
   function addTag(raw: string) {
@@ -398,6 +407,12 @@ function ComposeInner() {
                     </button>
                   ))}
                 </div>
+              )}
+              {media.length > 0 && noMediaChannels.length > 0 && (
+                <p className="mt-3 flex items-start gap-2 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">
+                  Some selected channels can&apos;t attach media — it will be published as a link or ignored on:{' '}
+                  {noMediaChannels.map((c) => c.name).join(', ')}.
+                </p>
               )}
             </div>
 

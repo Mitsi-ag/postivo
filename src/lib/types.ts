@@ -90,6 +90,7 @@ export interface UsageDTO {
   plan: 'free' | 'pro';
   channels: { used: number; limit: number };
   postsThisMonth: { used: number; limit: number };
+  storageMB: { used: number; limit: number };
   billingEnabled: boolean;
 }
 

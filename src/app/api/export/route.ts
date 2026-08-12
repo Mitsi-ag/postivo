@@ -12,10 +12,15 @@ import {
   type RssFeed,
   type TargetComment,
 } from '@/lib/db';
+import { rateLimit } from '@/lib/ratelimit';
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser(req);
   if (!user) return unauthorized();
+  // This export contains decrypted channel credentials — keep it tight.
+  if (!rateLimit(`export:${user.id}`, 5, 60 * 60_000)) {
+    return NextResponse.json({ error: 'Export limit reached — try again later' }, { status: 429 });
+  }
 
   // Owner-only export of their own data — credentials are decrypted here just
   // like they are presented to providers at publish time.
@@ -23,24 +28,36 @@ export async function GET(req: NextRequest) {
     ...c,
     credentials: decryptChannelCredentials(c),
   }));
-  const posts = [];
-  for (const p of await query<Post>('SELECT * FROM posts WHERE user_id = $1', [user.id])) {
-    const targets = [];
-    for (const t of await query<PostTarget>('SELECT t.* FROM post_targets t WHERE t.post_id = $1', [p.id])) {
-      targets.push({
-        ...t,
-        comments: await query<TargetComment>(
-          'SELECT * FROM post_targets_comments WHERE target_id = $1 ORDER BY idx ASC',
-          [t.id],
-        ),
-      });
-    }
-    posts.push({
-      ...p,
-      media: Array.isArray(p.media) ? p.media : [],
-      targets,
-    });
+  // Two queries total (no N+1): fetch every target and every comment the user
+  // owns, then group in memory.
+  const userPosts = await query<Post>('SELECT * FROM posts WHERE user_id = $1', [user.id]);
+  const allTargets = await query<PostTarget>(
+    'SELECT t.* FROM post_targets t JOIN posts p ON p.id = t.post_id WHERE p.user_id = $1',
+    [user.id],
+  );
+  const allComments = await query<TargetComment>(
+    `SELECT c.* FROM post_targets_comments c
+     JOIN post_targets t ON t.id = c.target_id
+     JOIN posts p ON p.id = t.post_id WHERE p.user_id = $1 ORDER BY c.idx ASC`,
+    [user.id],
+  );
+  const commentsByTarget = new Map<string, TargetComment[]>();
+  for (const c of allComments) {
+    const list = commentsByTarget.get(c.target_id) ?? [];
+    list.push(c);
+    commentsByTarget.set(c.target_id, list);
   }
+  const targetsByPost = new Map<string, PostTarget[]>();
+  for (const t of allTargets) {
+    const list = targetsByPost.get(t.post_id) ?? [];
+    list.push(t);
+    targetsByPost.set(t.post_id, list);
+  }
+  const posts = userPosts.map((p) => ({
+    ...p,
+    media: Array.isArray(p.media) ? p.media : [],
+    targets: (targetsByPost.get(p.id) ?? []).map((t) => ({ ...t, comments: commentsByTarget.get(t.id) ?? [] })),
+  }));
   const apiKeys = (await query<ApiKey>('SELECT * FROM api_keys WHERE user_id = $1', [user.id])).map((k) => ({
     id: k.id,
     name: k.name,

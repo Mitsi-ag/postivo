@@ -275,7 +275,7 @@ export async function updatePost(
   userId: string,
   postId: string,
   body: UpdatePostInput,
-): Promise<{ post?: PostDTO; error?: string; status?: number }> {
+): Promise<{ post?: PostDTO; error?: string; status?: number; upgrade?: boolean }> {
   const existing = await one<Post>('SELECT * FROM posts WHERE id = $1 AND user_id = $2', [postId, userId]);
   if (!existing) return { error: 'Post not found', status: 404 };
 
@@ -309,6 +309,38 @@ export async function updatePost(
   if (scheduledAt && Number.isNaN(Date.parse(scheduledAt))) return { error: 'Invalid scheduled_at datetime', status: 400 };
   if (!content && media.length === 0) return { error: 'Content is required', status: 400 };
 
+  // The monthly quota applies when a post newly becomes scheduled — same rule
+  // as createPost, so drafts can't be stockpiled and scheduled via update.
+  const becomingScheduled = status === 'scheduled' && existing.status !== 'scheduled';
+  if (becomingScheduled) {
+    const user = await one<User>('SELECT * FROM users WHERE id = $1', [userId]);
+    const limit = planOf(user ?? { plan: 'free' }).postsPerMonth;
+    const used = await postsThisMonth(userId);
+    if (used >= limit) {
+      return {
+        error: `Your plan allows ${limit} scheduled posts per month — upgrade to schedule more.`,
+        status: 402,
+        upgrade: true,
+      };
+    }
+  }
+
+  // Compute the final target set before writing anything: a scheduled post
+  // with zero targets could never publish and would be stuck forever.
+  const existingTargets = await query<PostTarget>('SELECT * FROM post_targets WHERE post_id = $1', [postId]);
+  let newChannelIds: string[] | null = null;
+  if (body.channelIds) {
+    newChannelIds = await validChannelIds(userId, body.channelIds);
+  }
+  if (status === 'scheduled') {
+    const have = new Set(existingTargets.map((t) => t.channel_id));
+    const kept = newChannelIds
+      ? existingTargets.filter((t) => t.status !== 'pending' || newChannelIds!.includes(t.channel_id)).length
+      : existingTargets.length;
+    const added = newChannelIds ? newChannelIds.filter((cid) => !have.has(cid)).length : 0;
+    if (kept + added === 0) return { error: 'Select at least one channel to schedule', status: 400 };
+  }
+
   // Unscheduling (draft) implicitly clears the repeat schedule.
   const finalRepeat = !scheduledAt ? null : repeat !== undefined ? repeat : (existing.repeat_every_days ?? null);
 
@@ -326,10 +358,9 @@ export async function updatePost(
     ],
   );
 
-  if (body.channelIds) {
-    const channelIds = await validChannelIds(userId, body.channelIds);
+  if (newChannelIds) {
+    const channelIds = newChannelIds;
     // Drop pending targets for channels no longer selected.
-    const existingTargets = await query<PostTarget>('SELECT * FROM post_targets WHERE post_id = $1', [postId]);
     for (const t of existingTargets) {
       if (t.status === 'pending' && !channelIds.includes(t.channel_id)) {
         await query('DELETE FROM post_targets WHERE id = $1', [t.id]);

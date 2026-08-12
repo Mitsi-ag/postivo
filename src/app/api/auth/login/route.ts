@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Too many attempts — try again in a few minutes' }, { status: 429 });
   }
   const body = (await req.json().catch(() => null)) as LoginBody | null;
-  if (!body?.email || !body.password) {
+  if (!body?.email || !body.password || body.password.length > 256) {
     return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
   }
   const user = await one<User>('SELECT * FROM users WHERE email = $1', [body.email.trim().toLowerCase()]);

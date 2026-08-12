@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { one, query, type User } from '@/lib/db';
-import { renderPasswordResetEmail, sendMail } from '@/lib/mailer';
+import { renderPasswordResetEmail, sendMail, emailEnabled } from '@/lib/mailer';
 import { clientIp, rateLimit } from '@/lib/ratelimit';
 import { appUrl, generateToken, testTokensEnabled } from '@/lib/tokens';
 
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
   const body = (await req.json().catch(() => null)) as ForgotBody | null;
   const email = (body?.email ?? '').trim().toLowerCase();
-  const res = NextResponse.json({ ok: true });
+  const res = NextResponse.json({ ok: true, email_enabled: emailEnabled() });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res;
   const user = await one<User>('SELECT * FROM users WHERE email = $1', [email]);
   if (!user) return res;

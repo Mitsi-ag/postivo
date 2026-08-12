@@ -7,6 +7,7 @@ import { createPost } from './core';
 import { channelsUsed, postsThisMonth, planOf } from './plans';
 import { newItems, parseFeed } from './rss';
 import { guardedFetch, readBodyCapped } from './ssrf';
+import { signedMediaUrl } from './mediaShare';
 
 const STARTED = Symbol.for('postivo.scheduler.started');
 const MAX_ATTEMPTS = 3;
@@ -128,6 +129,23 @@ async function tick(): Promise<void> {
     await processComment(row);
   }
   await pollRssFeeds();
+  await sweepOrphanedPosts();
+}
+
+// A scheduled post with zero targets can never publish (nothing claims it) —
+// fail it once it's past due instead of letting it sit in 'scheduled' forever.
+// Normally impossible to create (createPost/updatePost require a channel), but
+// channel deletion can orphan an already-scheduled post.
+async function sweepOrphanedPosts(): Promise<void> {
+  const orphaned = await query<{ id: string }>(
+    `UPDATE posts SET status = 'failed', updated_at = now()
+     WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= now()
+       AND NOT EXISTS (SELECT 1 FROM post_targets t WHERE t.post_id = posts.id)
+     RETURNING id`,
+  );
+  for (const p of orphaned) {
+    console.log(`[postivo] post ${p.id} failed: scheduled past due with no targets`);
+  }
 }
 
 // Append the user's signature when it fits the provider's limit.
@@ -154,7 +172,9 @@ async function scheduleComments(row: DueRow, comments: PostComment[]): Promise<v
 async function processTarget(row: DueRow): Promise<void> {
   const channel = await one<Channel>('SELECT * FROM channels WHERE id = $1', [row.channel_id]);
   const mediaIds = Array.isArray(row.media) ? row.media : [];
-  const mediaUrls = mediaIds.map((id) => `/api/media/${id}`);
+  // Providers fetch media over the public internet — hand them absolute,
+  // HMAC-signed, expiring URLs (a session-cookie path would always 401).
+  const mediaUrls = mediaIds.map((id) => signedMediaUrl(id));
 
   try {
     if (!channel) throw new Error('Channel no longer exists');
@@ -203,6 +223,12 @@ async function processTarget(row: DueRow): Promise<void> {
         attempts,
         row.id,
       ]);
+      // Credential-shaped failures (401/403/unauthorized/invalid token) mean
+      // the channel itself is broken — surface that on the channels page so
+      // the user knows to reconnect instead of wondering why posts fail.
+      if (channel && /\b(401|403)\b|unauthorized|forbidden|invalid\s+(token|key|cred|grant)|expired\s+token|revoked/i.test(message)) {
+        await query(`UPDATE channels SET status = 'error' WHERE id = $1 AND status = 'active'`, [channel.id]);
+      }
       await log(row.id, 'error', `Failed permanently after ${attempts} attempts: ${message}`);
       fireOutbound(row.outbound_webhook_url, {
         event: 'post.failed',

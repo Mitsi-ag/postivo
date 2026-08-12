@@ -27,7 +27,6 @@ const SLOTS: Record<string, Slot[]> = {
     { days: WEEKEND, hours: [20, 21] },
     { days: WEEKDAYS, hours: [14, 15] },
   ],
-  instagram: [{ days: WEEKDAYS, hours: [11, 13, 19] }],
   telegram: [{ days: ALL, hours: [9, 12, 20] }],
   discord: [{ days: ALL, hours: [12, 18, 21] }],
   slack: [{ days: WEEKDAYS, hours: [9, 10, 14] }],

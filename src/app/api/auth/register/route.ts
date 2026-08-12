@@ -28,18 +28,31 @@ export async function POST(req: NextRequest) {
   if (body.password.length < 8) {
     return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
   }
+  if (body.password.length > 256) {
+    // scrypt cost scales with input length — cap it to avoid CPU-DoS.
+    return NextResponse.json({ error: 'Password must be at most 256 characters' }, { status: 400 });
+  }
   if (await one<User>('SELECT * FROM users WHERE email = $1', [email])) {
     // Deliberately generic — don't confirm that the email is registered.
     return NextResponse.json({ error: 'Could not create account' }, { status: 409 });
   }
   const id = crypto.randomUUID();
-  await query('INSERT INTO users (id, email, password_hash, name, timezone) VALUES ($1,$2,$3,$4,$5)', [
-    id,
-    email,
-    hashPassword(body.password),
-    (body.name ?? '').trim() || email.split('@')[0],
-    (body.timezone ?? '').trim() || 'UTC',
-  ]);
+  try {
+    await query('INSERT INTO users (id, email, password_hash, name, timezone) VALUES ($1,$2,$3,$4,$5)', [
+      id,
+      email,
+      hashPassword(body.password),
+      (body.name ?? '').trim() || email.split('@')[0],
+      (body.timezone ?? '').trim() || 'UTC',
+    ]);
+  } catch (err) {
+    // Two concurrent registrations with the same email race past the SELECT
+    // above — the UNIQUE constraint decides; answer like the check would have.
+    if ((err as { code?: string }).code === '23505') {
+      return NextResponse.json({ error: 'Could not create account' }, { status: 409 });
+    }
+    throw err;
+  }
   const user = await one<User>('SELECT * FROM users WHERE id = $1', [id]);
   const res = NextResponse.json({ user: publicUser(user as User) });
   await attachSession(res, id, req);

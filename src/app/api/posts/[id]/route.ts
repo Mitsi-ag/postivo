@@ -18,7 +18,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = (await req.json().catch(() => null)) as UpdatePostInput | null;
   if (!body) return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   const result = await updatePost(user.id, id, body);
-  if (result.error) return NextResponse.json({ error: result.error }, { status: result.status ?? 400 });
+  if (result.error) {
+    return NextResponse.json({ error: result.error, upgrade: result.upgrade ?? false }, { status: result.status ?? 400 });
+  }
   return NextResponse.json({ post: result.post });
 }
 

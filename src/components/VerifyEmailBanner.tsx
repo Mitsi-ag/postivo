@@ -14,9 +14,13 @@ export default function VerifyEmailBanner() {
     setBusy(true);
     setMessage(null);
     try {
-      await api('/api/auth/verify/resend', { method: 'POST' });
-      setTone('ok');
-      setMessage('Verification email sent — check your inbox.');
+      const res = await api<{ ok: boolean; email_enabled?: boolean }>('/api/auth/verify/resend', { method: 'POST' });
+      setTone(res.email_enabled === false ? 'err' : 'ok');
+      setMessage(
+        res.email_enabled === false
+          ? 'Email delivery is not configured on this instance — no message was sent.'
+          : 'Verification email sent — check your inbox.',
+      );
     } catch (err) {
       setTone('err');
       setMessage(

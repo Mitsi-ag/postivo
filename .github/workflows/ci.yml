@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Build needs a reachable Postgres at boot (schema bootstrap is
+      # idempotent); a throwaway service container satisfies that.
+      - run: docker compose up -d --wait
+      - run: npm run build
+        env:
+          DATABASE_URL: postgres://postivo:postivo@localhost:5432/postivo
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: docker compose up -d --wait
+      - name: Start app (dev server, test hooks armed)
+        run: |
+          PORT=3220 DATABASE_URL=postgres://postivo:postivo@localhost:5432/postivo \
+            SSRF_ALLOW_HOSTS=localhost E2E_TOKENS=1 nohup npm run dev > app.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3220/api/health && exit 0 || sleep 2
+          done
+          echo "app failed to start" && cat app.log && exit 1
+      - name: Prewarm + run e2e suite
+        run: |
+          PORT=3220 bash scripts/prewarm.sh
+          npm run test:e2e
