@@ -10,6 +10,9 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
   timeout: 60_000,
+  // Dev-mode cold compiles can exceed the 5s assertion default even with
+  // scripts/prewarm.sh — give assertions room instead of flaking.
+  expect: { timeout: 15_000 },
   retries: 0,
   workers: 1, // serial: tests share the app's per-IP rate limiter buckets
   reporter: 'line',

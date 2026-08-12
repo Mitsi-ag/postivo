@@ -60,10 +60,10 @@ test('forgot: always 200, identical for known and unknown emails', async () => {
   const { user } = await register(ctx, 'forgot');
   const known = await ctx.post('/api/auth/forgot', { data: { email: user.email } });
   expect(known.status()).toBe(200);
-  expect(await known.json()).toEqual({ ok: true });
+  expect(await known.json()).toEqual({ ok: true, email_enabled: false });
   const unknown = await ctx.post('/api/auth/forgot', { data: { email: `ghost-${RUN}@postivo.dev` } });
   expect(unknown.status()).toBe(200);
-  expect(await unknown.json()).toEqual({ ok: true });
+  expect(await unknown.json()).toEqual({ ok: true, email_enabled: false });
   // The hook leaks the token only for the existing account.
   expect(known.headers()['x-test-reset-token']).toBeTruthy();
   expect(unknown.headers()['x-test-reset-token']).toBeFalsy();
@@ -196,9 +196,10 @@ test('verify: dashboard banner shows for unverified, resend works then 429s', as
 
   const resend = page.getByRole('button', { name: 'Resend' });
   // Endpoint allows 3 resends per 10 min per user; the 4th must 429.
+  // The suite runs with email stubbed, so the banner is honest about that.
   for (let i = 0; i < 3; i++) {
     await resend.click();
-    await expect(page.getByText('Verification email sent — check your inbox.')).toBeVisible();
+    await expect(page.getByText('Email delivery is not configured on this instance')).toBeVisible();
   }
   await resend.click();
   await expect(page.getByText('Too many requests — try again in a few minutes.')).toBeVisible();
