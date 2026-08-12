@@ -23,8 +23,11 @@ if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
   aws apprunner create-service --cli-input-json file:///tmp/apprunner-service.json --region "$REGION"
 else
   echo "==> Updating existing App Runner service ${SERVICE_ARN}…"
+  # Auto-deploy on ECR push usually beats us here — an in-progress rollout is
+  # success, not failure.
   aws apprunner update-service --service-arn "$SERVICE_ARN" --region "$REGION" \
-    --source-configuration "ImageRepository={ImageIdentifier=${ECR_URI}:latest,ImageRepositoryType=ECR,ImageConfiguration={Port=3000}},AuthenticationConfiguration={AccessRoleArn=arn:aws:iam::${ACCOUNT_ID}:role/AppRunnerECRAccessRole},AutoDeploymentsEnabled=true"
+    --source-configuration "ImageRepository={ImageIdentifier=${ECR_URI}:latest,ImageRepositoryType=ECR,ImageConfiguration={Port=3000}},AuthenticationConfiguration={AccessRoleArn=arn:aws:iam::${ACCOUNT_ID}:role/AppRunnerECRAccessRole},AutoDeploymentsEnabled=true" \
+    || echo "==> Update skipped (auto-deployment from the ECR push is already rolling)"
 fi
 
 echo "==> Done. Service URL:"
