@@ -199,7 +199,7 @@ test('verify: dashboard banner shows for unverified, resend works then 429s', as
   // The suite runs with email stubbed, so the banner is honest about that.
   for (let i = 0; i < 3; i++) {
     await resend.click();
-    await expect(page.getByText('Email delivery is not configured on this instance')).toBeVisible();
+    await expect(page.getByText("We couldn't send the email — delivery isn't set up on this workspace.")).toBeVisible();
   }
   await resend.click();
   await expect(page.getByText('Too many requests — try again in a few minutes.')).toBeVisible();

@@ -24,6 +24,7 @@ function ResetPasswordInner() {
   const token = useSearchParams().get('token') ?? '';
   const [view, setView] = useState<View>('checking');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -101,17 +102,27 @@ function ResetPasswordInner() {
             <label htmlFor="reset-password" className="mb-1 block text-xs font-medium text-mut">
               New password
             </label>
-            <input
-              id="reset-password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputCls}
-              placeholder="At least 8 characters"
-            />
+            <div className="relative">
+              <input
+                id="reset-password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={`${inputCls} pr-14`}
+                placeholder="At least 8 characters"
+              />
+              <button
+                type="button"
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-1 text-xs text-dim transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris-soft"
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </div>
           <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>
             {busy ? 'Resetting…' : 'Reset password'}
@@ -146,6 +157,9 @@ export default function ResetPasswordPage() {
         >
           <ResetPasswordInner />
         </Suspense>
+        <p className="mt-6 text-center font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+          One process · One file · Your data
+        </p>
       </div>
     </div>
   );

@@ -26,9 +26,6 @@ export async function channelsUsed(userId: string): Promise<number> {
   return row?.c ?? 0;
 }
 
-// Scheduled posts created in the current calendar month. Counts any post that
-// was given a schedule — including ones already published or failed — so the
-// monthly quota can't be bypassed by posts leaving the 'scheduled' status.
 // Cumulative media storage used, in bytes. A hard per-plan cap (not just a
 // per-hour rate limit) keeps the storage bill bounded per user.
 export async function storageUsed(userId: string): Promise<number> {
@@ -36,10 +33,13 @@ export async function storageUsed(userId: string): Promise<number> {
   return Number(row?.b ?? 0);
 }
 
+// Scheduled posts counted against this calendar month's quota. The timestamp
+// is first_scheduled_at — when the post FIRST became scheduled — so stockpiled
+// drafts from previous months still count when scheduled now (no bypass).
 export async function postsThisMonth(userId: string): Promise<number> {
   const row = await one<{ c: number }>(
     `SELECT COUNT(*)::int AS c FROM posts
-     WHERE user_id = $1 AND scheduled_at IS NOT NULL AND created_at >= date_trunc('month', now())`,
+     WHERE user_id = $1 AND first_scheduled_at IS NOT NULL AND first_scheduled_at >= date_trunc('month', now())`,
     [userId],
   );
   return row?.c ?? 0;

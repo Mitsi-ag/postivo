@@ -5,9 +5,9 @@ import { useEffect, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
 import { FilmIcon, ImageIcon, UploadIcon } from '@/components/icons';
-import { btnGhost, cardCls, EmptyState, ErrorBanner, inputCls, Skeleton } from '@/components/ui';
+import { btnGhost, cardCls, ConfirmDialog, EmptyState, ErrorBanner, inputCls, Skeleton } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
-import type { MediaListItemDTO } from '@/lib/types';
+import type { MediaListItemDTO, UsageDTO } from '@/lib/types';
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -22,6 +22,9 @@ export default function LibraryPage() {
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
+  const [usage, setUsage] = useState<UsageDTO | null>(null);
+  const [broken, setBroken] = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<MediaListItemDTO | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   function load() {
@@ -31,6 +34,12 @@ export default function LibraryPage() {
   }
 
   useEffect(load, []);
+
+  useEffect(() => {
+    api<UsageDTO>('/api/usage')
+      .then(setUsage)
+      .catch(() => {});
+  }, []);
 
   async function uploadFiles(files: Iterable<File>) {
     for (const f of files) {
@@ -65,8 +74,6 @@ export default function LibraryPage() {
   }
 
   async function remove(m: MediaListItemDTO) {
-    if (!window.confirm(`Delete "${m.name}"? Posts already published keep their copies, but scheduled posts using it may fail.`))
-      return;
     try {
       await api(`/api/media/${m.id}`, { method: 'DELETE' });
       toast.success('Media deleted');
@@ -88,7 +95,10 @@ export default function LibraryPage() {
 
         <div className={cardCls}>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => fileInput.current?.click()} className={btnGhost}>
+            <button
+              onClick={() => fileInput.current?.click()}
+              className={`${btnGhost} disabled:border-line/50 disabled:bg-raised/30 disabled:text-dim disabled:opacity-100`}
+            >
               <UploadIcon size={14} />
               Upload file
             </button>
@@ -112,10 +122,23 @@ export default function LibraryPage() {
                 aria-label="Import media from URL"
                 className={`${inputCls} min-w-40 flex-1`}
               />
-              <button type="submit" disabled={busy || !url.trim()} className={btnGhost}>
+              <button
+                type="submit"
+                disabled={busy || !url.trim()}
+                className={`${btnGhost} disabled:border-line/50 disabled:bg-raised/30 disabled:text-dim disabled:opacity-100`}
+              >
                 {busy ? 'Importing…' : 'Import'}
               </button>
             </form>
+            {usage && (
+              <a
+                href="/settings/billing"
+                className="ml-auto font-mono text-[11px] text-dim transition-colors hover:text-fg"
+                title="Manage your plan"
+              >
+                {usage.storageMB.used} MB of {usage.storageMB.limit} MB used
+              </a>
+            )}
           </div>
         </div>
 
@@ -145,13 +168,20 @@ export default function LibraryPage() {
                 className="group overflow-hidden rounded-xl border border-line bg-surface transition hover:border-line2"
               >
                 <div className="relative aspect-square">
-                  {m.mime.startsWith('image/') ? (
+                  {m.mime.startsWith('image/') && !broken.has(m.id) ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={`/api/media/${m.id}`} alt={m.name} className="h-full w-full object-cover" />
+                    <img
+                      src={`/api/media/${m.id}`}
+                      alt={m.name}
+                      className="h-full w-full object-cover"
+                      onError={() => setBroken((s) => new Set(s).add(m.id))}
+                    />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-raised text-dim"><FilmIcon size={26} /></div>
+                    <div className="flex h-full w-full items-center justify-center bg-raised text-dim">
+                      {m.mime.startsWith('image/') ? <ImageIcon size={26} /> : <FilmIcon size={26} />}
+                    </div>
                   )}
-                  <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/60 opacity-0 transition group-hover:opacity-100">
+                  <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/60 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                     <button
                       onClick={() => useInComposer(m.id)}
                       className="rounded-lg bg-iris px-3 py-1.5 text-xs font-medium text-fg hover:bg-iris-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris-soft"
@@ -160,7 +190,7 @@ export default function LibraryPage() {
                       Use in composer
                     </button>
                     <button
-                      onClick={() => void remove(m)}
+                      onClick={() => setPendingDelete(m)}
                       className="rounded-lg border border-err/25 bg-err/15 px-3 py-1.5 text-xs text-err hover:bg-err/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-err"
                       aria-label={`Delete ${m.name}`}
                     >
@@ -181,6 +211,24 @@ export default function LibraryPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete media?"
+        body={
+          pendingDelete
+            ? `Delete "${pendingDelete.name}"? Posts already published keep their copies, but scheduled posts using it may fail.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          const m = pendingDelete;
+          setPendingDelete(null);
+          if (m) void remove(m);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </Portal>
   );
 }

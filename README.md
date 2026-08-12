@@ -126,11 +126,14 @@ Point a Stripe webhook at `https://<app>/api/billing/webhook` for those two even
 |---|---|---|
 | 🧪 Demo | — | Always succeeds; returns a fake URL. For testing. |
 | 🪝 Webhook | URL, optional secret | POSTs `{content, media, scheduled_at, id}` with optional `X-Postivo-Secret`. Works with n8n / Zapier / Make. |
-| 🦋 Bluesky | handle, app password | Settings → App Passwords on bsky.app. |
-| 🐘 Mastodon | instance URL, access token | Preferences → Development → New application (`write:statuses`). |
+| 🦋 Bluesky | handle, app password | Settings → App Passwords on bsky.app. Native image upload (up to 4 images). |
+| 🐘 Mastodon | instance URL, access token | Preferences → Development → New application (`write:statuses write:media`). Native image/video upload. |
 | 👩‍💻 DEV | API key | dev.to Settings → Extensions → DEV Community API Keys. Publishes full articles. |
-| 𝕏 | OAuth2 user access token | Needs `tweet.write` scope (user context). |
-| 💼 LinkedIn | OAuth2 access token, person URN | `w_member_social` scope; URN looks like `urn:li:person:…`. |
+| 𝕏 | OAuth2 user access token | Needs `tweet.write` + `media.write` scopes (user context). Native image upload (chunked); no video yet. |
+| 💼 LinkedIn | OAuth2 access token, person URN | `w_member_social` scope; URN looks like `urn:li:person:…`. Native image upload (first image). |
+| ✈️ Telegram | bot token, chat/channel ID | Bot API. Native photo/video upload (first item) via sendPhoto/sendVideo. |
+| 🎮 Discord | webhook URL | Channel webhook. Native file attachment (first item) via multipart webhook execute. |
+| 💬 Slack | incoming webhook URL; bot token + channel ID for media | Native file upload (files.*External flow) needs a bot token; text-only falls back to chat.postMessage or the webhook. |
 | 📸 Instagram | long-lived access token, Instagram Business account ID | Graph API (Business/Creator accounts via Facebook Login). Requires an image or video; `.mp4`/`.mov` publish as Reels. |
 | 🎵 TikTok | OAuth2 access token | Content Posting API (`video.upload` scope). Video only — TikTok pulls it from the signed media URL. |
 | ▶️ YouTube | OAuth2 access token | Needs the `youtube.upload` scope. Video only (resumable upload); publishes as public. |

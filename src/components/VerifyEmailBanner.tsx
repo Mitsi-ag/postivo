@@ -18,7 +18,7 @@ export default function VerifyEmailBanner() {
       setTone(res.email_enabled === false ? 'err' : 'ok');
       setMessage(
         res.email_enabled === false
-          ? 'Email delivery is not configured on this instance — no message was sent.'
+          ? "We couldn't send the email — delivery isn't set up on this workspace. Contact support@postivo.keenshift.ai."
           : 'Verification email sent — check your inbox.',
       );
     } catch (err) {

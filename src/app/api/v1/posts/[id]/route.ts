@@ -33,6 +33,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (auth instanceof NextResponse) return auth;
   const user = auth;
   const { id } = await params;
-  if (!(await deletePost(user.id, id))) return NextResponse.json({ error: 'Post not found' }, { status: 404 });
+  const result = await deletePost(user.id, id);
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status ?? 400 });
   return NextResponse.json({ ok: true });
 }

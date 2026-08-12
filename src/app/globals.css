@@ -13,8 +13,9 @@
   --color-ink: #07080c; /* page background */
   --color-surface: #0d1017; /* elevated surface */
   --color-raised: #131722; /* hover / nested / inputs */
-  --color-line: rgba(255, 255, 255, 0.07); /* hairline */
+  --color-line: rgba(255, 255, 255, 0.07); /* hairline (decorative) */
   --color-line2: rgba(255, 255, 255, 0.14); /* hover hairline */
+  --color-control: rgba(255, 255, 255, 0.36); /* interactive control borders — 3.2:1, WCAG 1.4.11 */
 
   --color-fg: #e6e9f0;
   --color-mut: #9aa3b5;
@@ -22,6 +23,7 @@
 
   --color-iris: #6e6bf0;
   --color-iris-deep: #5b58e8;
+  --color-iris-fill: #4f4cd9; /* solid fills (buttons/tabs) — 5.9:1 with white, WCAG AA */
   --color-iris-soft: #a5a2f6; /* text on dark */
 
   --color-ok: #34d399;
@@ -182,6 +184,9 @@ body {
 }
 .animate-marquee {
   animation: marquee 42s linear infinite;
+}
+.animate-marquee:hover {
+  animation-play-state: paused;
 }
 .marquee-mask {
   mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);

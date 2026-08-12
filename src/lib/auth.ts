@@ -13,16 +13,24 @@ const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 30 days
 
 // ---------- passwords ----------
 
-export function hashPassword(password: string): string {
+// Async scrypt — the sync variant blocks the event loop for every concurrent
+// request during a login burst.
+function scryptAsync(password: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, key) => (err ? reject(err) : resolve(key)));
+  });
+}
+
+export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  const hash = (await scryptAsync(password, salt)).toString('hex');
   return `${salt}:${hash}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [salt, hash] = stored.split(':');
   if (!salt || !hash) return false;
-  const candidate = crypto.scryptSync(password, salt, 64);
+  const candidate = await scryptAsync(password, salt);
   const expected = Buffer.from(hash, 'hex');
   return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
 }
@@ -170,8 +178,9 @@ export async function getSessionUser(req: NextRequest): Promise<User | null> {
   return (await one<User>('SELECT * FROM users WHERE id = $1', [claims.uid])) ?? null;
 }
 
-// Public v1 API auth: 120 req/min per key; 30 req/min for invalid Bearer
-// tokens (keyed by the presented key prefix + IP) so brute-force is throttled.
+// Public v1 API auth: 120 req/min per key; invalid Bearer tokens are
+// throttled per-IP (attacker-controlled key prefixes can't mint fresh
+// buckets) so brute-force always hits the same counter.
 export async function authV1(req: NextRequest): Promise<User | NextResponse> {
   const header = req.headers.get('authorization') || '';
   const match = header.match(/^Bearer\s+(pv_[a-f0-9]{48})$/i);
@@ -180,7 +189,7 @@ export async function authV1(req: NextRequest): Promise<User | NextResponse> {
   if (!rateLimit(`v1:${prefix}`, 120, 60_000)) return tooManyRequests();
   const user = match ? await authByApiKey(req) : null;
   if (!user) {
-    if (!rateLimit(`v1-invalid:${prefix}:${clientIp(req)}`, 30, 60_000)) return tooManyRequests();
+    if (!rateLimit(`v1-invalid:${clientIp(req)}`, 30, 60_000)) return tooManyRequests();
     return unauthorized();
   }
   return user;
@@ -193,7 +202,9 @@ export async function authByApiKey(req: NextRequest): Promise<User | null> {
   const hash = crypto.createHash('sha256').update(match[1]).digest('hex');
   const key = await one<ApiKey>('SELECT * FROM api_keys WHERE key_hash = $1', [hash]);
   if (!key) return null;
-  await query('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [key.id]);
+  // Touch last_used_at at most once a minute — a write per request is
+  // needless WAL churn at 120 req/min/key.
+  await query(`UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at <= now() - interval '1 minute')`, [key.id]);
   return (await one<User>('SELECT * FROM users WHERE id = $1', [key.user_id])) ?? null;
 }
 

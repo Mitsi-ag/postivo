@@ -15,7 +15,12 @@ let cachedKey: Buffer | null = null;
 function key(): Buffer {
   if (cachedKey) return cachedKey;
   const hex = (process.env.CREDENTIALS_KEY ?? '').trim();
-  cachedKey = /^[a-f0-9]{64}$/i.test(hex)
+  if (hex && !/^[a-f0-9]{64}$/i.test(hex)) {
+    // A malformed key must be loud — silently falling back to the session
+    // secret would make existing credentials undecryptable after a "fix".
+    throw new Error('CREDENTIALS_KEY must be exactly 64 hex characters (32 bytes)');
+  }
+  cachedKey = hex
     ? Buffer.from(hex, 'hex')
     : crypto.scryptSync(getSecret(), 'postivo-credentials-v1', 32);
   return cachedKey;

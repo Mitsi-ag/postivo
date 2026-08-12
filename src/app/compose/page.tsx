@@ -1,13 +1,13 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
 import PostPreview from '@/components/PostPreview';
 import { useToast } from '@/components/toast';
-import { EyeIcon, FilmIcon, ImageIcon, PenIcon, PlusIcon, SparkIcon, XIcon } from '@/components/icons';
+import { CheckIcon, EyeIcon, FilmIcon, ImageIcon, PenIcon, PlusIcon, SparkIcon, UploadIcon, XIcon } from '@/components/icons';
 import { ClockIcon, ProviderMark } from '@/components/icons';
-import { btnGhost, btnPrimary, cardCls, ErrorBanner, inputCls, TagChip, UpgradeBanner } from '@/components/ui';
+import { btnGhost, btnPrimary, cardCls, ErrorBanner, inputCls, selectCls, TagChip, UpgradeBanner } from '@/components/ui';
 import { api, ApiError, formatDate, toLocalInput } from '@/lib/client';
 import type { ChannelDTO, ChannelSetDTO, MediaListItemDTO, PostCommentDTO, PostDTO, ProviderMeta, PublicUser } from '@/lib/types';
 
@@ -21,12 +21,28 @@ interface MediaLibraryModalProps {
 function MediaLibraryModal({ onPick, onClose }: MediaLibraryModalProps) {
   const [items, setItems] = useState<MediaListItemDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     api<{ media: MediaListItemDTO[] }>('/api/media-list')
       .then((d) => setItems(d.media))
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load library'));
   }, []);
+
+  // Focus management: move focus into the dialog on open, return it on close,
+  // and let Escape dismiss.
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      previous?.focus();
+    };
+  }, [onClose]);
 
   return (
     <div
@@ -42,7 +58,7 @@ function MediaLibraryModal({ onPick, onClose }: MediaLibraryModalProps) {
       >
         <div className="mb-4 flex items-center justify-between">
           <h3 className="font-semibold text-fg">Media library</h3>
-          <button onClick={onClose} aria-label="Close media library" className="text-mut transition-colors hover:text-fg">
+          <button ref={closeRef} onClick={onClose} aria-label="Close media library" className="text-mut transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris">
             <XIcon size={16} />
           </button>
         </div>
@@ -114,6 +130,12 @@ function ComposeInner() {
   const [aiBusy, setAiBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [openThread, setOpenThread] = useState(false);
+  const [openMedia, setOpenMedia] = useState(false);
+  const [openTags, setOpenTags] = useState(false);
+  const [setNameOpen, setSetNameOpen] = useState(false);
+  const [setName, setSetName] = useState('');
+  const [mediaNames, setMediaNames] = useState<Record<string, string>>({});
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -138,8 +160,17 @@ function ComposeInner() {
     if (pending) {
       sessionStorage.removeItem('postivo:attach');
       setMedia((m) => (m.includes(pending) ? m : [...m, pending]));
+      setOpenMedia(true);
       toast.success('Media attached from library');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Deep-linked schedule time (?at=YYYY-MM-DDTHH:mm) — calendar slots link here.
+  useEffect(() => {
+    if (editId) return;
+    const at = searchParams.get('at');
+    if (at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at)) setWhen(at);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -152,6 +183,10 @@ function ComposeInner() {
         setWhen(toLocalInput(post.scheduled_at));
         setComments(post.comments ?? []);
         setTags(post.tags ?? []);
+        // Editing a post that already has thread/media/tags → start those open.
+        if ((post.comments ?? []).length > 0) setOpenThread(true);
+        if (post.media.length > 0) setOpenMedia(true);
+        if ((post.tags ?? []).length > 0) setOpenTags(true);
         if (post.repeat_every_days) {
           const r = String(post.repeat_every_days);
           if (r === '7' || r === '30') setRepeat(r);
@@ -178,6 +213,19 @@ function ComposeInner() {
   }, [editId]);
 
   const selectedIds = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
+
+  // Warn before navigating away with unsaved work.
+  const dirty = content.trim() !== '' || media.length > 0 || selectedIds.length > 0;
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
   const charLimit = useMemo(() => {
     const limits = selectedIds
       .map((id) => channels.find((c) => c.id === id))
@@ -187,6 +235,18 @@ function ComposeInner() {
     return limits.length ? Math.min(...limits) : null;
   }, [selectedIds, channels, providers]);
   const overLimit = charLimit !== null && content.length > charLimit;
+
+  // Which channel binds the character limit — attribution for the counter.
+  const limitBy = useMemo(() => {
+    if (charLimit === null) return null;
+    for (const id of selectedIds) {
+      const c = channels.find((ch) => ch.id === id);
+      if (c && providers[c.provider]?.maxLength === charLimit) {
+        return providers[c.provider]?.name ?? c.name;
+      }
+    }
+    return null;
+  }, [charLimit, selectedIds, channels, providers]);
 
   const noReplyChannels = useMemo(
     () =>
@@ -225,6 +285,8 @@ function ComposeInner() {
         const data = (await res.json()) as { id?: string; error?: string };
         if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
         setMedia((m) => [...m, data.id as string]);
+        setMediaNames((n) => ({ ...n, [data.id as string]: f.name }));
+        setOpenMedia(true);
         toast.success(`Uploaded ${f.name}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Upload failed');
@@ -292,29 +354,36 @@ function ComposeInner() {
     toast.success(`Applied set "${set.name}"`);
   }
 
-  async function saveAsSet() {
+  function saveAsSet() {
     if (selectedIds.length === 0) {
       toast.error('Select some channels first');
       return;
     }
-    const name = window.prompt('Name for this channel set:');
-    if (!name?.trim()) return;
+    setSetName('');
+    setSetNameOpen(true);
+  }
+
+  async function confirmSaveSet() {
+    const name = setName.trim();
+    if (!name) return;
     try {
       const d = await api<{ set: ChannelSetDTO }>('/api/sets', {
         method: 'POST',
-        json: { name: name.trim(), channelIds: selectedIds },
+        json: { name, channelIds: selectedIds },
       });
       setSets((s) => [...s, d.set]);
+      setSetNameOpen(false);
       toast.success(`Set "${d.set.name}" saved`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save set');
     }
   }
 
-  async function save(asDraft: boolean) {
+  async function save(asDraft: boolean, atOverride?: string) {
+    const whenVal = atOverride ?? when;
     setError(null);
     if (!asDraft) {
-      if (!when) {
+      if (!whenVal) {
         setError('Pick a date and time to schedule.');
         return;
       }
@@ -323,7 +392,7 @@ function ComposeInner() {
         return;
       }
     }
-    if (repeatDays && !when) {
+    if (repeatDays && !whenVal) {
       setError('Recurring posts need a scheduled date and time.');
       return;
     }
@@ -335,7 +404,7 @@ function ComposeInner() {
     const payload = {
       content,
       media,
-      scheduled_at: asDraft ? null : new Date(when).toISOString(),
+      scheduled_at: asDraft ? null : new Date(whenVal).toISOString(),
       channelIds: selectedIds,
       overrides,
       comments: comments.filter((c) => c.content.trim()),
@@ -357,6 +426,14 @@ function ComposeInner() {
     }
   }
 
+  function publishNow() {
+    const now = toLocalInput(new Date().toISOString());
+    setWhen(now);
+    void save(false, now);
+  }
+
+  const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+
   return (
     <Portal title={editId ? 'Edit post' : 'Compose'}>
       <div className="mx-auto max-w-7xl">
@@ -375,6 +452,7 @@ function ComposeInner() {
                 <span className={`font-mono text-xs ${overLimit ? 'font-semibold text-err' : 'text-dim'}`}>
                   {content.length}
                   {charLimit !== null ? ` / ${charLimit}` : ''} chars
+                  {limitBy ? ` · limited by ${limitBy}` : ''}
                 </span>
               </div>
               <textarea
@@ -429,7 +507,7 @@ function ComposeInner() {
                         if (e.target.value) applySet(e.target.value);
                         e.target.value = '';
                       }}
-                      className="rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-fg focus:border-iris focus:outline-none"
+                      className={`${selectCls} py-1.5 text-xs`}
                     >
                       <option value="" disabled>
                         Apply set…
@@ -441,11 +519,37 @@ function ComposeInner() {
                       ))}
                     </select>
                   )}
-                  <button onClick={() => void saveAsSet()} className="rounded-lg border border-line px-2.5 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised">
+                  <button onClick={() => saveAsSet()} className="rounded-lg border border-line px-2.5 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised">
                     Save as set
                   </button>
                 </div>
               </div>
+              {setNameOpen && (
+                <div className="mb-3 flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={setName}
+                    onChange={(e) => setSetName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void confirmSaveSet();
+                      } else if (e.key === 'Escape') {
+                        setSetNameOpen(false);
+                      }
+                    }}
+                    placeholder="Set name"
+                    aria-label="Set name"
+                    className={`${inputCls} max-w-xs`}
+                  />
+                  <button onClick={() => void confirmSaveSet()} disabled={!setName.trim()} className={btnPrimary}>
+                    Save
+                  </button>
+                  <button onClick={() => setSetNameOpen(false)} className={btnGhost}>
+                    Cancel
+                  </button>
+                </div>
+              )}
               {channels.length === 0 ? (
                 <p className="text-sm text-dim">
                   No channels yet —{' '}
@@ -465,16 +569,17 @@ function ComposeInner() {
                           key={c.id}
                           onClick={() => setSelected((s) => ({ ...s, [c.id]: !s[c.id] }))}
                           aria-pressed={active}
-                          className={`rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
                             active
                               ? 'border-iris bg-iris/10 text-iris-soft'
                               : 'border-line text-mut hover:border-line2'
                           }`}
                           title={meta ? `Max ${meta.maxLength} chars` : undefined}
                         >
+                          {active && <CheckIcon size={11} />}
                           <ProviderMark id={c.provider} name={meta?.name ?? c.provider} color={meta?.color} size={18} />
                           {c.name}
-                          {meta && <span className="ml-1.5 text-xs opacity-60">{meta.maxLength}</span>}
+                          {meta && <span className="ml-1.5 text-[10px] text-dim">{meta.maxLength.toLocaleString()} chars</span>}
                         </button>
                       );
                     })}
@@ -512,7 +617,31 @@ function ComposeInner() {
               )}
             </div>
 
+            {/* Secondary sections — collapsed behind chips until needed */}
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Optional sections">
+              {(
+                [
+                  { label: '+ Thread', open: openThread, toggle: () => setOpenThread((v) => !v) },
+                  { label: '+ Media', open: openMedia, toggle: () => setOpenMedia((v) => !v) },
+                  { label: '+ Tags', open: openTags, toggle: () => setOpenTags((v) => !v) },
+                ] as const
+              ).map((s) => (
+                <button
+                  key={s.label}
+                  onClick={s.toggle}
+                  aria-pressed={s.open}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
+                    s.open ? 'border-iris bg-iris/10 text-iris-soft' : 'border-line text-mut hover:border-line2 hover:text-fg'
+                  }`}
+                >
+                  {s.open && <CheckIcon size={11} />}
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
             {/* Follow-ups (thread) */}
+            {openThread && (
             <div className={cardCls}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-medium text-fg">Follow-ups</span>
@@ -572,8 +701,10 @@ function ComposeInner() {
                 ))}
               </div>
             </div>
+            )}
 
             {/* Media */}
+            {openMedia && (
             <div className={cardCls}>
               <span className="mb-3 block text-sm font-medium text-fg">Media</span>
               <div
@@ -591,13 +722,20 @@ function ComposeInner() {
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click();
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault(); // keep Space from scrolling the page
+                    fileInput.current?.click();
+                  }
                 }}
                 className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm transition ${
-                  dragOver ? 'border-iris bg-iris/5 text-iris-soft' : 'border-line text-dim hover:border-line2'
+                  dragOver ? 'border-iris bg-iris/5 text-iris-soft' : 'border-white/15 bg-raised/40 text-mut hover:border-line2'
                 }`}
               >
-                Drag & drop images or videos here, or click to browse (max 50MB)
+                <UploadIcon size={18} className="mx-auto text-dim" />
+                <p className="mt-2">
+                  Drag files here, or <span className="text-iris-soft underline underline-offset-2">browse</span>
+                </p>
+                <p className="mt-1 text-xs text-dim">Images or videos · max 50MB</p>
               </div>
               <input
                 ref={fileInput}
@@ -611,12 +749,12 @@ function ComposeInner() {
                   e.target.value = '';
                 }}
               />
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                 <input
                   value={urlImport}
                   onChange={(e) => setUrlImport(e.target.value)}
                   placeholder="https://… import media from URL"
-                  className={`${inputCls} max-w-xs flex-1`}
+                  className={`${inputCls} w-full flex-1 sm:max-w-xs`}
                   aria-label="Import media from URL"
                 />
                 <button onClick={() => void importFromUrl()} disabled={urlBusy || !urlImport.trim()} className={btnGhost}>
@@ -635,7 +773,7 @@ function ComposeInner() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={`/api/media/${id}`}
-                          alt="upload"
+                          alt={mediaNames[id] ?? id}
                           className="h-20 w-20 rounded-lg border border-line object-cover"
                         />
                       ) : (
@@ -646,7 +784,7 @@ function ComposeInner() {
                       <button
                         onClick={() => setMedia((m) => m.filter((x) => x !== id))}
                         aria-label="Remove media"
-                        className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-err text-xs text-fg group-hover:flex"
+                        className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-err text-xs text-fg group-focus-within:flex group-hover:flex [@media(hover:none)]:flex"
                       >
                         ×
                       </button>
@@ -655,8 +793,10 @@ function ComposeInner() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Tags */}
+            {openTags && (
             <div className={cardCls}>
               <label htmlFor="tag-input" className="mb-2 block text-sm font-medium text-fg">
                 Tags
@@ -687,6 +827,7 @@ function ComposeInner() {
               </div>
               <p className="mt-2 text-xs text-dim">Organize posts and filter them in the queue and calendar.</p>
             </div>
+            )}
 
             {/* Schedule */}
             <div className={cardCls}>
@@ -735,7 +876,7 @@ function ComposeInner() {
                     id="repeat"
                     value={repeat}
                     onChange={(e) => setRepeat(e.target.value)}
-                    className={`${inputCls} max-w-xs`}
+                    className={`${selectCls} w-full max-w-xs`}
                   >
                     <option value="">Does not repeat</option>
                     <option value="7">Every 7 days</option>
@@ -771,18 +912,27 @@ function ComposeInner() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3">
-              <button onClick={() => void save(true)} disabled={busy} className={btnGhost}>
-                Save draft
-              </button>
-              <button onClick={() => void save(false)} disabled={busy} className={btnPrimary}>
-                {busy ? 'Saving…' : editId ? 'Save & schedule' : 'Schedule post'}
-              </button>
+            {/* Sticky action bar — always reachable, shows the scheduled time */}
+            <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 border-t border-line bg-ink/90 py-3 backdrop-blur-md">
+              <span className="min-w-0 truncate font-mono text-xs text-dim">
+                {when ? formatDate(new Date(when).toISOString()) : 'No time set'}
+              </span>
+              <div className="flex shrink-0 justify-end gap-2 sm:gap-3">
+                <button onClick={() => void save(true)} disabled={busy} className={btnGhost}>
+                  Save draft
+                </button>
+                <button onClick={() => publishNow()} disabled={busy} className={btnGhost}>
+                  Publish now
+                </button>
+                <button onClick={() => void save(false)} disabled={busy} className={btnPrimary}>
+                  {busy ? 'Saving…' : 'Schedule post'}
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* ── Right: live previews ─────────────────────────────────── */}
-          <div className="min-w-0">
+          {/* ── Right: live previews (first on mobile) ──────────────── */}
+          <div className="order-first min-w-0 lg:order-none">
             <div className="space-y-4 lg:sticky lg:top-6">
               <h2 className="text-sm font-medium text-fg">Live preview</h2>
               {selectedIds.length === 0 ? (
@@ -817,7 +967,13 @@ function ComposeInner() {
                             {max !== undefined ? ` / ${max}` : ''}
                           </span>
                         </div>
-                        <PostPreview meta={meta} channelName={c.name} content={text} media={media} />
+                        <PostPreview
+                          meta={meta}
+                          channelName={c.name}
+                          content={text}
+                          media={media}
+                          when={when ? formatDate(new Date(when).toISOString()) : 'now'}
+                        />
                       </div>
                     );
                   })
@@ -829,7 +985,7 @@ function ComposeInner() {
 
       {libraryOpen && (
         <MediaLibraryModal
-          onClose={() => setLibraryOpen(false)}
+          onClose={closeLibrary}
           onPick={(id) => {
             setMedia((m) => (m.includes(id) ? m : [...m, id]));
             setLibraryOpen(false);

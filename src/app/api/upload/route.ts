@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { query } from '@/lib/db';
-import { putMedia } from '@/lib/storage';
+import { putMedia, deleteMedia } from '@/lib/storage';
 import { rateLimit } from '@/lib/ratelimit';
 import { planOf, storageUsed } from '@/lib/plans';
 
@@ -32,6 +32,12 @@ export async function POST(req: NextRequest) {
   if (!file || typeof file === 'string') {
     return NextResponse.json({ error: 'Missing "file" field in multipart form' }, { status: 400 });
   }
+  // Early reject on declared size — the full buffer check below still applies,
+  // but a huge request should die before we arrayBuffer() it into memory.
+  const declared = Number(req.headers.get('content-length') ?? 0);
+  if (declared > MAX_BYTES + 1024 * 1024) {
+    return NextResponse.json({ error: 'File exceeds the 50MB limit' }, { status: 413 });
+  }
   if (!/^(image|video)\//.test(file.type)) {
     return NextResponse.json({ error: 'Only image/* and video/* uploads are allowed' }, { status: 415 });
   }
@@ -58,13 +64,19 @@ export async function POST(req: NextRequest) {
     (file.name.includes('.') ? (file.name.split('.').pop() ?? 'bin').toLowerCase().replace(/[^a-z0-9]/g, '') : 'bin');
   const id = `${crypto.randomUUID()}.${ext || 'bin'}`;
   await putMedia(user.id, id, file.type, buffer);
-  await query('INSERT INTO media (id, user_id, mime, name, size) VALUES ($1,$2,$3,$4,$5)', [
-    id,
-    user.id,
-    file.type,
-    (file.name || id).slice(0, 300),
-    buffer.byteLength,
-  ]);
+  try {
+    await query('INSERT INTO media (id, user_id, mime, name, size) VALUES ($1,$2,$3,$4,$5)', [
+      id,
+      user.id,
+      file.type,
+      (file.name || id).slice(0, 300),
+      buffer.byteLength,
+    ]);
+  } catch (err) {
+    // Compensate: an untracked object would sit in storage quota-free forever.
+    await deleteMedia(user.id, id).catch(() => {});
+    throw err;
+  }
 
   return NextResponse.json({ id, url: `/api/media/${id}` }, { status: 201 });
 }

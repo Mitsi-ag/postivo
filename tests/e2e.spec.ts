@@ -43,11 +43,11 @@ test.describe('auth', () => {
     await expect(page).toHaveURL(/\/login/);
 
     await page.getByPlaceholder('you@example.com').fill(email);
-    await page.getByPlaceholder('••••••••').fill('totally-wrong-99');
+    await page.getByLabel('Password').fill('totally-wrong-99');
     await page.getByRole('button', { name: 'Log in' }).click();
     await expect(page.getByText('Invalid email or password')).toBeVisible();
 
-    await page.getByPlaceholder('••••••••').fill(password);
+    await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Log in' }).click();
     await expect(page).toHaveURL(/\/dashboard/);
   });
@@ -62,8 +62,8 @@ test.describe('channels', () => {
     await page.getByRole('button', { name: 'Connect channel' }).click();
     await expect(page.getByText('My Demo')).toBeVisible();
 
-    page.once('dialog', (d) => void d.accept());
     await page.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByText('No channels connected yet')).toBeVisible();
   });
 });
@@ -83,12 +83,14 @@ test.describe('compose & publish', () => {
     await expect(page.getByText('Live preview')).toBeVisible();
     await expect(page.getByRole('paragraph').filter({ hasText: content })).toBeVisible();
 
-    // Follow-up thread row.
+    // Follow-up thread row (behind the "+ Thread" section toggle).
+    await page.getByRole('button', { name: '+ Thread' }).click();
     await page.getByRole('button', { name: 'Add follow-up' }).click();
     await expect(page.getByText('Reply 1')).toBeVisible();
     await page.getByPlaceholder('Follow-up content…').fill(`follow-up ${RUN}`);
 
-    // Tag chip.
+    // Tag chip (behind the "+ Tags" section toggle).
+    await page.getByRole('button', { name: '+ Tags' }).click();
     await page.locator('#tag-input').fill('e2etag');
     await page.locator('#tag-input').press('Enter');
     await expect(page.getByText('#e2etag')).toBeVisible();
@@ -171,8 +173,8 @@ test.describe('queue', () => {
     // Delete the draft.
     await page.getByRole('tab', { name: 'Drafts' }).click();
     await expect(page.getByText(`Draft beta ${RUN}`)).toBeVisible();
-    page.once('dialog', (d) => void d.accept());
     await page.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByText(`Draft beta ${RUN}`)).toHaveCount(0);
     void channelId;
   });
@@ -218,8 +220,8 @@ test.describe('library', () => {
     await expect(page.getByRole('status').filter({ hasText: `Uploaded ${name}` })).toBeVisible();
     await expect(page.getByText(name, { exact: true })).toBeVisible();
 
-    page.once('dialog', (d) => void d.accept());
     await page.getByLabel(`Delete ${name}`).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByText('Your library is empty')).toBeVisible();
   });
 });
@@ -272,7 +274,8 @@ test.describe('billing', () => {
   test('plan card renders on /settings/billing', async ({ page }) => {
     await registerViaApi(page, 'billing');
     await page.goto('/settings/billing');
-    await expect(page.getByText('Current plan')).toBeVisible();
+    // The plan-comparison cards carry a 'Current plan' chip too — assert on the first match.
+    await expect(page.getByText('Current plan').first()).toBeVisible();
     await expect(page.getByText('Free', { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('heading', { name: /Pro — \$9\/mo/ })).toBeVisible();
   });

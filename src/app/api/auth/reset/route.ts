@@ -46,12 +46,20 @@ export async function POST(req: NextRequest) {
   const result = await lookup(body.token);
   if (result.error) return NextResponse.json(result.error, { status: 400 });
   const { row } = result;
-  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(body.password), row.user_id]);
-  await query('UPDATE password_resets SET used_at = now() WHERE id = $1', [row.id]);
+  // Atomically consume the token — two concurrent requests must not both
+  // pass the used_at IS NULL check and set different passwords.
+  const claimed = await one<{ user_id: string }>(
+    `UPDATE password_resets SET used_at = now()
+     WHERE id = $1 AND used_at IS NULL AND expires_at > now()
+     RETURNING user_id`,
+    [row.id],
+  );
+  if (!claimed) return NextResponse.json(INVALID, { status: 400 });
+  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [await hashPassword(body.password), claimed.user_id]);
   // A password reset kills every existing session (stolen cookies included),
   // then issues a fresh one so the resetter lands signed in.
-  await revokeAllSessions(row.user_id);
+  await revokeAllSessions(claimed.user_id);
   const res = NextResponse.json({ ok: true });
-  await attachSession(res, row.user_id, req);
+  await attachSession(res, claimed.user_id, req);
   return res;
 }

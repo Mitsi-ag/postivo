@@ -1,9 +1,17 @@
 import crypto from 'node:crypto';
-import { one, query, type Channel, type Post, type PostComment, type PostTarget, type User } from './db';
+import { one, query, withTransaction, lockUser, type Channel, type Post, type PostComment, type PostTarget, type User } from './db';
 import { getProvider, providerMetaFor } from './providers/registry';
 import { decryptChannelCredentials, encryptJson } from './crypto';
 import { channelsUsed, planOf, postsThisMonth } from './plans';
 import type { ChannelDTO, PostDTO, TargetDTO } from './types';
+
+// Hard input caps — authenticated users must not be able to grow Postgres
+// unbounded or fan out thousands of validation queries with one request.
+const MAX_CONTENT_CHARS = 10_000;
+const MAX_MEDIA_PER_POST = 10;
+const MAX_CHANNELS_PER_POST = 100;
+const MAX_DRAFTS = 500;
+const MAX_COMMENT_DELAY_MIN = 7 * 24 * 60; // a follow-up at most 7 days later
 
 // ---------- channels ----------
 
@@ -63,13 +71,18 @@ interface TargetJoin extends PostTarget {
   provider: string | null;
 }
 
-export async function serializePost(post: Post): Promise<PostDTO> {
-  const rows = await query<TargetJoin>(
-    `SELECT t.*, c.name AS channel_name, c.provider AS provider
-     FROM post_targets t LEFT JOIN channels c ON c.id = t.channel_id
-     WHERE t.post_id = $1 ORDER BY t.id ASC`,
-    [post.id],
-  );
+// Exported for the bulk loader below.
+export type { TargetJoin };
+
+export async function serializePost(post: Post, targetRows?: TargetJoin[]): Promise<PostDTO> {
+  const rows =
+    targetRows ??
+    (await query<TargetJoin>(
+      `SELECT t.*, c.name AS channel_name, c.provider AS provider
+       FROM post_targets t LEFT JOIN channels c ON c.id = t.channel_id
+       WHERE t.post_id = $1 ORDER BY t.id ASC`,
+      [post.id],
+    ));
   const targets: TargetDTO[] = rows.map((r) => ({
     id: r.id,
     channel_id: r.channel_id,
@@ -147,7 +160,22 @@ export async function listPosts(userId: string, statusOrOpts?: string | ListPost
     const limit = status ? 200 : 500;
     posts = await query<Post>(`SELECT * FROM posts p WHERE ${where} ORDER BY ${order} LIMIT ${limit}`, params);
   }
-  return Promise.all(posts.map(serializePost));
+  // Bulk-load all targets in ONE query instead of N+1 per post.
+  if (posts.length === 0) return [];
+  const ids = posts.map((p) => p.id);
+  const allTargets = await query<TargetJoin>(
+    `SELECT t.*, c.name AS channel_name, c.provider AS provider
+     FROM post_targets t LEFT JOIN channels c ON c.id = t.channel_id
+     WHERE t.post_id = ANY($1::text[]) ORDER BY t.id ASC`,
+    [ids],
+  );
+  const byPost = new Map<string, TargetJoin[]>();
+  for (const t of allTargets) {
+    const list = byPost.get(t.post_id) ?? [];
+    list.push(t);
+    byPost.set(t.post_id, list);
+  }
+  return Promise.all(posts.map((p) => serializePost(p, byPost.get(p.id) ?? [])));
 }
 
 export interface PostInput {
@@ -168,7 +196,7 @@ function parseComments(raw: unknown): PostComment[] | null {
   for (const c of raw) {
     const content = typeof (c as PostComment)?.content === 'string' ? cleanText((c as PostComment).content).trim() : '';
     const delayMin = Number((c as PostComment)?.delayMin);
-    if (!content || !Number.isFinite(delayMin) || delayMin < 0) return null;
+    if (!content || !Number.isFinite(delayMin) || delayMin < 0 || delayMin > MAX_COMMENT_DELAY_MIN) return null;
     out.push({ content, delayMin: Math.floor(delayMin) });
   }
   return out.slice(0, 20);
@@ -193,25 +221,30 @@ function parseRepeat(raw: unknown): number | null | undefined {
   return n;
 }
 
+// Bulk-validate channel ids in ONE query — must belong to the user; foreign,
+// bogus and duplicate ids are dropped.
 async function validChannelIds(userId: string, channelIds: string[]): Promise<string[]> {
-  const out: string[] = [];
-  for (const cid of channelIds) {
-    const ch = await one<Channel>('SELECT * FROM channels WHERE id = $1 AND user_id = $2', [cid, userId]);
-    if (ch) out.push(cid);
-  }
-  return out;
+  const unique = [...new Set(channelIds.filter((x) => typeof x === 'string'))].slice(0, MAX_CHANNELS_PER_POST);
+  if (unique.length === 0) return [];
+  const rows = await query<{ id: string }>('SELECT id FROM channels WHERE user_id = $1 AND id = ANY($2::text[])', [
+    userId,
+    unique,
+  ]);
+  const ok = new Set(rows.map((r) => r.id));
+  return unique.filter((id) => ok.has(id));
 }
 
 // Media attached to a post must belong to the user — foreign or bogus ids are
-// silently dropped (same policy as channelIds).
+// silently dropped (same policy as channelIds). Bulk query, same reason.
 async function validMediaIds(userId: string, mediaIds: unknown[]): Promise<string[]> {
-  const out: string[] = [];
-  for (const mid of mediaIds) {
-    if (typeof mid !== 'string') continue;
-    const m = await one<{ id: string }>('SELECT id FROM media WHERE id = $1 AND user_id = $2', [mid, userId]);
-    if (m) out.push(mid);
-  }
-  return out;
+  const unique = [...new Set(mediaIds.filter((x): x is string => typeof x === 'string'))].slice(0, MAX_MEDIA_PER_POST);
+  if (unique.length === 0) return [];
+  const rows = await query<{ id: string }>('SELECT id FROM media WHERE user_id = $1 AND id = ANY($2::text[])', [
+    userId,
+    unique,
+  ]);
+  const ok = new Set(rows.map((r) => r.id));
+  return unique.filter((id) => ok.has(id));
 }
 
 // Postgres text/jsonb cannot store NUL bytes — strip them from all
@@ -225,11 +258,14 @@ export async function createPost(
   body: PostInput,
 ): Promise<{ post?: PostDTO; error?: string; status?: number; upgrade?: boolean }> {
   const content = cleanText(body.content ?? '').trim();
+  if (content.length > MAX_CONTENT_CHARS) {
+    return { error: `Content exceeds the ${MAX_CONTENT_CHARS} character limit`, status: 400 };
+  }
   const media = await validMediaIds(user.id, Array.isArray(body.media) ? body.media : []);
   const scheduledAt = body.scheduled_at ?? null;
   const channelIds = await validChannelIds(user.id, body.channelIds ?? []);
   const comments = parseComments(body.comments);
-  if (!comments) return { error: 'comments must be an array of {content, delayMin>=0}', status: 400 };
+  if (!comments) return { error: `comments must be an array of {content, delayMin 0..${MAX_COMMENT_DELAY_MIN}}`, status: 400 };
   const tags = parseTags(body.tags);
   if (!tags) return { error: 'tags must be an array of strings', status: 400 };
   const repeat = parseRepeat(body.repeat_every_days);
@@ -240,29 +276,57 @@ export async function createPost(
   if (scheduledAt && channelIds.length === 0) return { error: 'Select at least one channel to schedule', status: 400 };
   if (scheduledAt && Number.isNaN(Date.parse(scheduledAt))) return { error: 'Invalid scheduled_at datetime', status: 400 };
 
-  if (scheduledAt) {
-    const limit = planOf(user).postsPerMonth;
-    const used = await postsThisMonth(user.id);
-    if (used >= limit) {
-      return {
-        error: `Your plan allows ${limit} scheduled posts per month — upgrade to schedule more.`,
-        status: 402,
-        upgrade: true,
-      };
-    }
-  }
-
   const id = crypto.randomUUID();
   const status = scheduledAt ? 'scheduled' : 'draft';
-  await query(
-    'INSERT INTO posts (id, user_id, content, media, scheduled_at, status, comments, repeat_every_days, tags) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-    [id, user.id, content, JSON.stringify(media), scheduledAt, status, JSON.stringify(comments), repeat, JSON.stringify(tags)],
-  );
-  for (const cid of channelIds) {
-    await query(
-      'INSERT INTO post_targets (id, post_id, channel_id, content_override, status, retry_count) VALUES ($1,$2,$3,$4,$5,0)',
-      [crypto.randomUUID(), id, cid, cleanText(body.overrides?.[cid] ?? '').trim() || null, 'pending'],
+  // Quota check + insert run under a per-user advisory lock in one
+  // transaction — concurrent requests can't race past the plan limits, and a
+  // failed insert can't leave a post with partial targets.
+  const err = await withTransaction(async (q) => {
+    await lockUser(q, user.id);
+    if (scheduledAt) {
+      const limit = planOf(user).postsPerMonth;
+      const used = await postsThisMonth(user.id);
+      if (used >= limit) {
+        return {
+          error: `Your plan allows ${limit} scheduled posts per month — upgrade to schedule more.`,
+          status: 402,
+          upgrade: true,
+        };
+      }
+    } else {
+      const drafts = await q<{ c: number }>(`SELECT COUNT(*)::int AS c FROM posts WHERE user_id = $1 AND status = 'draft'`, [
+        user.id,
+      ]);
+      if ((drafts[0]?.c ?? 0) >= MAX_DRAFTS) {
+        return { error: `Draft limit reached (${MAX_DRAFTS}) — delete or schedule some first`, status: 400 };
+      }
+    }
+    await q(
+      'INSERT INTO posts (id, user_id, content, media, scheduled_at, first_scheduled_at, status, comments, repeat_every_days, tags) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      [
+        id,
+        user.id,
+        content,
+        JSON.stringify(media),
+        scheduledAt,
+        scheduledAt ? new Date().toISOString() : null,
+        status,
+        JSON.stringify(comments),
+        repeat,
+        JSON.stringify(tags),
+      ],
     );
+    for (const cid of channelIds) {
+      await q(
+        'INSERT INTO post_targets (id, post_id, channel_id, content_override, status, retry_count) VALUES ($1,$2,$3,$4,$5,0)',
+        [crypto.randomUUID(), id, cid, cleanText(body.overrides?.[cid] ?? '').trim() || null, 'pending'],
+      );
+    }
+    return null;
+  }).catch((e) => ({ error: 'Could not create post', status: 500, cause: e }) as { error: string; status: number; upgrade?: boolean });
+  if (err) {
+    if ('cause' in err) console.error('[postivo] createPost failed:', (err as { cause?: unknown }).cause);
+    return err;
   }
   return { post: (await getPostDTO(id, user.id)) ?? undefined };
 }
@@ -279,7 +343,18 @@ export async function updatePost(
   const existing = await one<Post>('SELECT * FROM posts WHERE id = $1 AND user_id = $2', [postId, userId]);
   if (!existing) return { error: 'Post not found', status: 404 };
 
+  // Never mutate a post the scheduler is actively publishing — the claimed
+  // row would publish stale content after the edit.
+  const inFlight = await one<{ id: string }>(
+    `SELECT id FROM post_targets WHERE post_id = $1 AND status = 'publishing' LIMIT 1`,
+    [postId],
+  );
+  if (inFlight) return { error: 'This post is being published right now — try again in a moment', status: 409 };
+
   const content = body.content !== undefined ? cleanText(body.content).trim() : existing.content;
+  if (content.length > MAX_CONTENT_CHARS) {
+    return { error: `Content exceeds the ${MAX_CONTENT_CHARS} character limit`, status: 400 };
+  }
   const media =
     body.media !== undefined
       ? await validMediaIds(userId, Array.isArray(body.media) ? body.media : [])
@@ -304,6 +379,12 @@ export async function updatePost(
     status = body.status as Post['status'];
   } else if (body.scheduled_at !== undefined) {
     status = scheduledAt ? 'scheduled' : 'draft';
+  }
+  // Completed posts are immutable history: published/failed can't silently
+  // become 'scheduled' again (their targets are terminal — the post would sit
+  // scheduled forever with nothing claimable). Duplicate it instead.
+  if (status === 'scheduled' && ['published', 'failed'].includes(existing.status)) {
+    return { error: 'This post already finished — duplicate it to schedule it again', status: 400 };
   }
   if (status === 'scheduled' && !scheduledAt) return { error: 'A scheduled post needs scheduled_at', status: 400 };
   if (scheduledAt && Number.isNaN(Date.parse(scheduledAt))) return { error: 'Invalid scheduled_at datetime', status: 400 };
@@ -343,9 +424,11 @@ export async function updatePost(
 
   // Unscheduling (draft) implicitly clears the repeat schedule.
   const finalRepeat = !scheduledAt ? null : repeat !== undefined ? repeat : (existing.repeat_every_days ?? null);
+  // first_scheduled_at is set exactly once — it's the quota timestamp.
+  const firstScheduledAt = existing.first_scheduled_at ?? (status === 'scheduled' ? new Date().toISOString() : null);
 
   await query(
-    'UPDATE posts SET content = $1, media = $2, scheduled_at = $3, status = $4, comments = $5, repeat_every_days = $6, tags = $7, updated_at = now() WHERE id = $8',
+    'UPDATE posts SET content = $1, media = $2, scheduled_at = $3, status = $4, comments = $5, repeat_every_days = $6, tags = $7, first_scheduled_at = $8, updated_at = now() WHERE id = $9',
     [
       content,
       JSON.stringify(media),
@@ -354,6 +437,7 @@ export async function updatePost(
       JSON.stringify(comments ?? (Array.isArray(existing.comments) ? existing.comments : [])),
       finalRepeat,
       JSON.stringify(tags ?? (Array.isArray(existing.tags) ? existing.tags : [])),
+      firstScheduledAt,
       postId,
     ],
   );
@@ -390,12 +474,19 @@ export async function updatePost(
   return { post: (await getPostDTO(postId, userId)) ?? undefined };
 }
 
-export async function deletePost(userId: string, postId: string): Promise<boolean> {
+export async function deletePost(userId: string, postId: string): Promise<{ ok: boolean; error?: string; status?: number }> {
   const existing = await one<Post>('SELECT * FROM posts WHERE id = $1 AND user_id = $2', [postId, userId]);
-  if (!existing) return false;
-  await query('DELETE FROM publish_log WHERE target_id IN (SELECT id FROM post_targets WHERE post_id = $1)', [postId]);
-  await query('DELETE FROM post_targets_comments WHERE target_id IN (SELECT id FROM post_targets WHERE post_id = $1)', [postId]);
-  await query('DELETE FROM post_targets WHERE post_id = $1', [postId]);
-  await query('DELETE FROM posts WHERE id = $1', [postId]);
-  return true;
+  if (!existing) return { ok: false, error: 'Post not found', status: 404 };
+  const inFlight = await one<{ id: string }>(
+    `SELECT id FROM post_targets WHERE post_id = $1 AND status = 'publishing' LIMIT 1`,
+    [postId],
+  );
+  if (inFlight) return { ok: false, error: 'This post is being published right now — try again in a moment', status: 409 };
+  await withTransaction(async (q) => {
+    await q('DELETE FROM publish_log WHERE target_id IN (SELECT id FROM post_targets WHERE post_id = $1)', [postId]);
+    await q('DELETE FROM post_targets_comments WHERE target_id IN (SELECT id FROM post_targets WHERE post_id = $1)', [postId]);
+    await q('DELETE FROM post_targets WHERE post_id = $1', [postId]);
+    await q('DELETE FROM posts WHERE id = $1', [postId]);
+  });
+  return { ok: true };
 }

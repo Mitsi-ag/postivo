@@ -38,15 +38,25 @@ function periodEnd(sub: Stripe.Subscription): string | null {
 
 async function syncSubscription(sub: Stripe.Subscription): Promise<void> {
   const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
+  // Only the configured Pro price confers Pro — ignore stray subscriptions
+  // (e.g. created out-of-band on the same customer).
+  const isProPrice = sub.items?.data?.some((i) => i.price?.id === process.env.STRIPE_PRICE_PRO) ?? true;
+  if (!isProPrice) return;
   if (sub.status === 'active' || sub.status === 'trialing') {
-    await query('UPDATE users SET plan = $1, plan_renews_at = $2 WHERE stripe_customer_id = $3', [
+    await query('UPDATE users SET plan = $1, plan_renews_at = $2, stripe_subscription_id = $3 WHERE stripe_customer_id = $4', [
       'pro',
       periodEnd(sub),
+      sub.id,
       customerId,
     ]);
   } else {
-    // past_due / unpaid / canceled / incomplete_expired — access ends here.
-    await query(`UPDATE users SET plan = 'free', plan_renews_at = NULL WHERE stripe_customer_id = $1`, [customerId]);
+    // Downgrade only when this IS the subscription we granted Pro for — a
+    // cancelled legacy sub must not strip an active newer one.
+    await query(
+      `UPDATE users SET plan = 'free', plan_renews_at = NULL
+       WHERE stripe_customer_id = $1 AND (stripe_subscription_id = $2 OR stripe_subscription_id IS NULL)`,
+      [customerId, sub.id],
+    );
   }
 }
 
@@ -74,14 +84,11 @@ async function syncSubscription(sub: Stripe.Subscription): Promise<void> {
       break;
     }
     case 'customer.subscription.created':
-    case 'customer.subscription.updated': {
-      await syncSubscription(event.data.object as Stripe.Subscription);
-      break;
-    }
+    case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
-      const subscription = event.data.object as Stripe.Subscription;
-      const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id;
-      await query(`UPDATE users SET plan = 'free', plan_renews_at = NULL WHERE stripe_customer_id = $1`, [customerId]);
+      // deleted == status 'canceled' — syncSubscription's guarded downgrade
+      // applies (only when it matches the subscription we granted Pro for).
+      await syncSubscription(event.data.object as Stripe.Subscription);
       break;
     }
     default:

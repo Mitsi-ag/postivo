@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
-import { CalendarIcon } from '@/components/icons';
-import { Badge, cardCls, EmptyState, ErrorBanner, selectCls, Skeleton } from '@/components/ui';
+import { CalendarIcon, PlusIcon } from '@/components/icons';
+import { Badge, btnGhost, cardCls, EmptyState, ErrorBanner, selectCls, Skeleton } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PostDTO } from '@/lib/types';
 
@@ -23,6 +24,7 @@ const DOT_COLOR: Record<string, string> = {
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function CalendarPage() {
+  const router = useRouter();
   const [view, setView] = useState<'month' | 'week'>('month');
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
@@ -35,6 +37,7 @@ export default function CalendarPage() {
   const [tagFilter, setTagFilter] = useState('');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     Promise.all([api<{ posts: PostDTO[] }>('/api/posts'), api<{ channels: ChannelDTO[] }>('/api/channels')])
@@ -72,16 +75,16 @@ export default function CalendarPage() {
     return map;
   }, [filtered]);
 
-  // Month cells
+  // Month cells — leading/trailing days from adjacent months render dimmed, never blank holes.
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthCells: (number | null)[] = [
-    ...Array<null>(firstWeekday).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  while (monthCells.length % 7 !== 0) monthCells.push(null);
+  const prevMonthDays = new Date(year, month, 0).getDate();
+  const monthCells: { n: number; current: boolean }[] = [];
+  for (let i = firstWeekday - 1; i >= 0; i--) monthCells.push({ n: prevMonthDays - i, current: false });
+  for (let d = 1; d <= daysInMonth; d++) monthCells.push({ n: d, current: true });
+  for (let d = 1; monthCells.length % 7 !== 0; d++) monthCells.push({ n: d, current: false });
 
   // Week cells (Sunday-start week containing cursor)
   const weekStart = new Date(cursor);
@@ -110,36 +113,63 @@ export default function CalendarPage() {
     setSelectedDay(null);
   }
 
+  function selectDay(key: string | null) {
+    setSelectedDay(key);
+    // Below lg the detail panel sits under the grid — bring it into view on select.
+    if (key && window.matchMedia('(max-width: 1023px)').matches) {
+      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ block: 'nearest' }));
+    }
+  }
+
   function renderDayCell(key: string, dayNum: number, extraCls = '') {
     const dayPosts = byDay.get(key) ?? [];
     const active = selectedDay === key;
     const isToday = key === dayKey(new Date());
+    const humanDay = new Date(`${key}T12:00:00`).toLocaleDateString(undefined, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
     return (
-      <button
-        key={key}
-        onClick={() => setSelectedDay(active ? null : key)}
-        aria-label={`${dayPosts.length} posts on ${key}`}
-        className={`flex min-h-20 flex-col rounded-lg border p-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
-          active ? 'border-iris bg-iris/10' : 'border-line bg-surface hover:border-line2'
-        } ${extraCls}`}
-      >
-        <span className={`text-xs ${isToday ? 'font-bold text-iris-soft' : 'text-mut'}`}>{dayNum}</span>
-        <div className="mt-1 space-y-1">
-          {dayPosts.slice(0, 3).map((p) => (
-            <div key={p.id} className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[p.status] ?? DOT_COLOR.draft}`} />
-              <span className="truncate text-[10px] text-mut">{p.content || '(media)'}</span>
-            </div>
-          ))}
-          {dayPosts.length > 3 && <div className="text-[10px] text-dim">+{dayPosts.length - 3} more</div>}
-        </div>
-      </button>
+      <div key={key} className="group relative h-full">
+        <button
+          onClick={() => selectDay(active ? null : key)}
+          aria-label={`${dayPosts.length} posts on ${humanDay}`}
+          aria-pressed={active}
+          className={`flex h-full min-h-20 w-full flex-col rounded-lg border p-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 ${
+            active ? 'border-iris bg-iris/10' : 'border-line bg-surface hover:border-line2'
+          } ${isToday ? 'ring-1 ring-iris/40' : ''} ${extraCls}`}
+        >
+          <span className={`text-xs ${isToday ? 'font-bold text-iris-soft' : 'text-mut'}`}>{dayNum}</span>
+          <div className="mt-1 space-y-1">
+            {dayPosts.slice(0, 3).map((p) => (
+              <div key={p.id} className="flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT_COLOR[p.status] ?? DOT_COLOR.draft}`} />
+                <span className="truncate text-[10px] text-mut">{p.content || '(media)'}</span>
+              </div>
+            ))}
+            {dayPosts.length > 3 && <div className="text-[10px] text-dim">+{dayPosts.length - 3} more</div>}
+          </div>
+        </button>
+        {/* Click-to-compose affordance */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/compose?at=${key}T09:00`);
+          }}
+          aria-label={`Compose a post for ${humanDay}`}
+          className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-md border border-line bg-raised text-dim opacity-0 transition hover:border-iris hover:text-iris-soft focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+        >
+          <PlusIcon size={11} />
+        </button>
+      </div>
     );
   }
 
   return (
     <Portal title="Calendar">
-      <div className="mx-auto max-w-5xl space-y-5">
+      <div className="mx-auto max-w-6xl space-y-5">
         <ErrorBanner message={error} />
 
         {/* Filter bar */}
@@ -187,12 +217,11 @@ export default function CalendarPage() {
                 key={v}
                 onClick={() => {
                   setView(v);
-                  setCursor(new Date());
                   setSelectedDay(null);
                 }}
                 aria-pressed={view === v}
                 className={`rounded-md px-3 py-1 text-xs capitalize ${
-                  view === v ? 'bg-iris font-medium text-fg' : 'text-mut hover:text-fg'
+                  view === v ? 'bg-iris-fill font-medium text-white' : 'text-mut hover:text-fg'
                 }`}
               >
                 {v}
@@ -201,107 +230,124 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        <div className={cardCls}>
-          <div className="mb-4 flex items-center justify-between">
-            <button
-              onClick={() => shift(-1)}
-              aria-label="Previous"
-              className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
-            >
-              ← Prev
-            </button>
-            <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-fg">{label}</h2>
+        <div className="grid items-start gap-5 lg:grid-cols-3">
+          <div className={`${cardCls} lg:col-span-2`}>
+            <div className="mb-4 flex items-center justify-between">
               <button
-                onClick={() => {
-                  const d = new Date();
-                  if (view === 'month') d.setDate(1);
-                  setCursor(d);
-                  setSelectedDay(null);
-                }}
-                className="text-xs text-iris-soft hover:text-iris-soft"
+                onClick={() => shift(-1)}
+                aria-label="Previous"
+                className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
               >
-                Today
+                ← Prev
+              </button>
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-semibold text-fg">{label}</h2>
+                <button
+                  onClick={() => {
+                    const d = new Date();
+                    if (view === 'month') d.setDate(1);
+                    setCursor(d);
+                    setSelectedDay(null);
+                  }}
+                  className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
+                >
+                  Today
+                </button>
+              </div>
+              <button
+                onClick={() => shift(1)}
+                aria-label="Next"
+                className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
+              >
+                Next →
               </button>
             </div>
-            <button
-              onClick={() => shift(1)}
-              aria-label="Next"
-              className="rounded-lg border border-line px-3 py-1.5 text-sm text-fg hover:bg-raised"
-            >
-              Next →
-            </button>
-          </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-dim">
-            {WEEKDAYS.map((d) => (
-              <div key={d} className="py-1">
-                {d}
-              </div>
-            ))}
-          </div>
-          {posts === null ? (
-            <div className="grid grid-cols-7 gap-1">
-              {Array.from({ length: 35 }, (_, i) => (
-                <Skeleton key={i} className="min-h-20" />
+            <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-dim">
+              {WEEKDAYS.map((d) => (
+                <div key={d} className="py-1">
+                  {d}
+                </div>
               ))}
             </div>
-          ) : view === 'month' ? (
-            <div className="grid grid-cols-7 gap-1">
-              {monthCells.map((day, i) =>
-                day === null ? (
-                  <div key={i} className="min-h-20 rounded-lg" />
-                ) : (
-                  renderDayCell(dayKey(new Date(year, month, day)), day)
-                ),
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-7 gap-1">
-              {weekDates.map((d) => renderDayCell(dayKey(d), d.getDate(), 'min-h-40'))}
-            </div>
-          )}
-        </div>
-
-        {selectedDay && (
-          <div className={cardCls}>
-            <h3 className="mb-3 font-semibold text-fg">
-              {new Date(`${selectedDay}T12:00:00`).toLocaleDateString(undefined, {
-                weekday: 'long',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </h3>
-            {selectedPosts.length === 0 ? (
-              <EmptyState icon={<CalendarIcon size={18} />} title="No posts on this day" hint="PICK A SLOT AND COMPOSE SOMETHING" />
-            ) : (
-              <ul className="divide-y divide-line/60">
-                {selectedPosts.map((p) => (
-                  <li key={p.id} className="flex items-start justify-between gap-4 py-3">
-                    <div className="min-w-0">
-                      <p className="text-sm text-fg">{p.content || '(media only)'}</p>
-                      <p className="mt-1 text-xs text-dim">
-                        {formatDate(p.scheduled_at ?? p.created_at)} ·{' '}
-                        {p.targets.map((t) => t.channel_name ?? t.provider).join(', ') || 'no channels'}
-                        {p.repeat_every_days ? ` · every ${p.repeat_every_days}d` : ''}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Badge status={p.status} />
-                      {(p.status === 'scheduled' || p.status === 'draft') && (
-                        <Link
-                          href={`/compose?post=${p.id}`}
-                          className="rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:bg-raised"
-                        >
-                          Edit
-                        </Link>
-                      )}
-                    </div>
-                  </li>
+            {posts === null ? (
+              <div className="grid grid-cols-7 gap-1">
+                {Array.from({ length: 35 }, (_, i) => (
+                  <Skeleton key={i} className="min-h-20" />
                 ))}
-              </ul>
+              </div>
+            ) : view === 'month' ? (
+              <div className="grid grid-cols-7 gap-1">
+                {monthCells.map((cell, i) =>
+                  cell.current ? (
+                    renderDayCell(dayKey(new Date(year, month, cell.n)), cell.n)
+                  ) : (
+                    <div
+                      key={`pad-${i}`}
+                      aria-hidden
+                      className="min-h-20 rounded-lg bg-surface/40 p-1.5 text-xs text-dim"
+                    >
+                      {cell.n}
+                    </div>
+                  ),
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-7 gap-1">
+                {weekDates.map((d) => renderDayCell(dayKey(d), d.getDate(), 'min-h-40'))}
+              </div>
             )}
           </div>
-        )}
+
+          {/* Day detail — right-hand rail on lg, below the grid (scrolled into view) on smaller screens */}
+          <div ref={detailRef} className={cardCls}>
+            {selectedDay === null ? (
+              <p className="text-sm text-dim">Select a day to see its posts.</p>
+            ) : (
+              <>
+                <h3 className="mb-3 font-semibold text-fg">
+                  {new Date(`${selectedDay}T12:00:00`).toLocaleDateString(undefined, {
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </h3>
+                <Link href={`/compose?at=${selectedDay}T09:00`} className={`${btnGhost} mb-3 w-full`}>
+                  <PlusIcon size={14} />
+                  Compose for this day
+                </Link>
+                {selectedPosts.length === 0 ? (
+                  <EmptyState icon={<CalendarIcon size={18} />} title="No posts on this day" hint="PICK A SLOT AND COMPOSE SOMETHING" />
+                ) : (
+                  <ul className="divide-y divide-line/60">
+                    {selectedPosts.map((p) => (
+                      <li key={p.id} className="flex items-start justify-between gap-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-sm text-fg">{p.content || '(media only)'}</p>
+                          <p className="mt-1 text-xs text-dim">
+                            {formatDate(p.scheduled_at ?? p.created_at)} ·{' '}
+                            {p.targets.map((t) => t.channel_name ?? t.provider).join(', ') || 'no channels'}
+                            {p.repeat_every_days ? ` · every ${p.repeat_every_days}d` : ''}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge status={p.status} />
+                          {(p.status === 'scheduled' || p.status === 'draft') && (
+                            <Link
+                              href={`/compose?post=${p.id}`}
+                              className="rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:bg-raised"
+                            >
+                              Edit
+                            </Link>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </Portal>
   );

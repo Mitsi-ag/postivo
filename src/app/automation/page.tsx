@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
-import { ProviderMark, RssIcon, SparkIcon } from '@/components/icons';
-import { btnDanger, btnPrimary, cardCls, EmptyState, ErrorBanner, inputCls, SkeletonCards } from '@/components/ui';
+import { CheckIcon, ProviderMark, RssIcon, SparkIcon } from '@/components/icons';
+import { btnDanger, btnGhost, btnPrimary, cardCls, Checkbox, ConfirmDialog, EmptyState, ErrorBanner, inputCls, SkeletonCards } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PublicUser, RssFeedDTO } from '@/lib/types';
 
@@ -21,6 +21,9 @@ export default function AutomationPage() {
   const [intervalMin, setIntervalMin] = useState('60');
   const [aiCaption, setAiCaption] = useState(false);
   const [feedBusy, setFeedBusy] = useState(false);
+  const [testBusy, setTestBusy] = useState(false);
+  const [feedTest, setFeedTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [pendingDeleteFeed, setPendingDeleteFeed] = useState<RssFeedDTO | null>(null);
 
   // Signature + webhook
   const [signature, setSignature] = useState('');
@@ -79,8 +82,31 @@ export default function AutomationPage() {
     }
   }
 
+  async function testFeed() {
+    const u = url.trim();
+    if (!u) {
+      toast.error('Enter a feed URL first');
+      return;
+    }
+    setTestBusy(true);
+    setFeedTest(null);
+    try {
+      const d = await api<{ ok: boolean; title?: string; itemCount: number; sample: string[] }>(
+        `/api/rss/preview?url=${encodeURIComponent(u)}`,
+      );
+      const sample = d.sample.filter(Boolean).join(' · ');
+      setFeedTest({
+        ok: true,
+        message: `${d.title ? `"${d.title}" — ` : ''}${d.itemCount} item${d.itemCount === 1 ? '' : 's'} found${sample ? `: ${sample}` : ''}`,
+      });
+    } catch (err) {
+      setFeedTest({ ok: false, message: err instanceof Error ? err.message : 'Feed test failed' });
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   async function deleteFeed(f: RssFeedDTO) {
-    if (!window.confirm(`Stop polling ${f.url}?`)) return;
     try {
       await api(`/api/rss?id=${encodeURIComponent(f.id)}`, { method: 'DELETE' });
       toast.success('Feed removed');
@@ -123,14 +149,41 @@ export default function AutomationPage() {
           </p>
 
           <form onSubmit={addFeed} className="mt-4 space-y-3">
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/feed.xml"
-              aria-label="Feed URL"
-              className={inputCls}
-              required
-            />
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={url}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  setFeedTest(null);
+                }}
+                placeholder="https://example.com/feed.xml"
+                aria-label="Feed URL"
+                className={inputCls}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => void testFeed()}
+                disabled={testBusy || !url.trim()}
+                className={`${btnGhost} shrink-0`}
+              >
+                {testBusy ? 'Testing…' : 'Test feed'}
+              </button>
+              <button type="submit" disabled={feedBusy || channels.length === 0} className={`${btnPrimary} shrink-0`}>
+                {feedBusy ? 'Adding…' : 'Add feed'}
+              </button>
+            </div>
+            {feedTest && (
+              <p
+                role="status"
+                className={`flex items-start gap-1.5 rounded-lg border px-3 py-2 text-xs ${
+                  feedTest.ok ? 'border-ok/25 bg-ok/10 text-ok' : 'border-err/25 bg-err/10 text-err'
+                }`}
+              >
+                {feedTest.ok && <CheckIcon size={13} className="mt-0.5 shrink-0" />}
+                {feedTest.message}
+              </p>
+            )}
             {channels.length === 0 ? (
               <p className="text-xs text-dim">
                 No channels yet —{' '}
@@ -149,12 +202,13 @@ export default function AutomationPage() {
                       key={c.id}
                       onClick={() => setFeedChannels((s) => ({ ...s, [c.id]: !s[c.id] }))}
                       aria-pressed={active}
-                      className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition ${
                         active
                           ? 'border-iris bg-iris/10 text-iris-soft'
                           : 'border-line text-mut hover:border-line2'
                       }`}
                     >
+                      {active && <CheckIcon size={11} />}
                       <ProviderMark id={c.provider} name={c.provider_meta?.name ?? c.provider} color={c.provider_meta?.color} size={16} />
                       {c.name}
                     </button>
@@ -175,19 +229,12 @@ export default function AutomationPage() {
                 />
                 minutes
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-mut">
-                <input
-                  type="checkbox"
-                  checked={aiCaption}
-                  onChange={(e) => setAiCaption(e.target.checked)}
-                  className="h-4 w-4 rounded border-line2 bg-surface accent-iris"
-                />
-                <SparkIcon size={13} className="text-iris-soft" />
-                Generate AI caption for each item
-              </label>
-              <button type="submit" disabled={feedBusy || channels.length === 0} className={`${btnPrimary} ml-auto`}>
-                {feedBusy ? 'Adding…' : 'Add feed'}
-              </button>
+              <Checkbox checked={aiCaption} onChange={setAiCaption}>
+                <span className="inline-flex items-center gap-2 text-xs">
+                  <SparkIcon size={13} className="text-iris-soft" />
+                  Generate AI caption for each item
+                </span>
+              </Checkbox>
             </div>
           </form>
 
@@ -215,7 +262,7 @@ export default function AutomationPage() {
                         polled {f.last_polled_at ? formatDate(f.last_polled_at) : 'never'}
                       </p>
                     </div>
-                    <button onClick={() => void deleteFeed(f)} className={btnDanger} aria-label={`Delete feed ${f.url}`}>
+                    <button onClick={() => setPendingDeleteFeed(f)} className={btnDanger} aria-label={`Delete feed ${f.url}`}>
                       Delete
                     </button>
                   </li>
@@ -236,15 +283,11 @@ export default function AutomationPage() {
           </div>
 
           <div>
-            <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-fg">
-              <input
-                type="checkbox"
-                checked={signatureEnabled}
-                onChange={(e) => setSignatureEnabled(e.target.checked)}
-                className="h-4 w-4 rounded border-line2 bg-surface accent-iris"
-              />
-              Append signature to posts
-            </label>
+            <div className="mb-2">
+              <Checkbox checked={signatureEnabled} onChange={setSignatureEnabled}>
+                <span className="text-fg">Append signature to posts</span>
+              </Checkbox>
+            </div>
             <textarea
               value={signature}
               onChange={(e) => setSignature(e.target.value)}
@@ -275,6 +318,20 @@ export default function AutomationPage() {
           </button>
         </form>
       </div>
+
+      <ConfirmDialog
+        open={pendingDeleteFeed !== null}
+        title="Remove feed?"
+        body={pendingDeleteFeed ? `Stop polling ${pendingDeleteFeed.url}?` : undefined}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          const f = pendingDeleteFeed;
+          setPendingDeleteFeed(null);
+          if (f) void deleteFeed(f);
+        }}
+        onCancel={() => setPendingDeleteFeed(null)}
+      />
     </Portal>
   );
 }

@@ -57,12 +57,14 @@ export function parseFeed(xml: string): FeedItem[] {
   return items;
 }
 
-// Returns items newer than lastGuid, oldest-first. On a first poll (lastGuid
-// null) only the newest item is returned so we never flood channels.
-export function newItems(items: FeedItem[], lastGuid: string | null): FeedItem[] {
+// Returns items not yet seen, oldest-first. On a first poll (no history) only
+// the newest item is returned so we never flood channels. History is a bounded
+// set of recent guids — tracking only the LAST guid would repost up to 10 old
+// items whenever that guid fell out of the feed window.
+export function newItems(items: FeedItem[], lastGuid: string | null, seenGuids: string[] = []): FeedItem[] {
   if (items.length === 0) return [];
-  if (!lastGuid) return [items[0]];
-  const idx = items.findIndex((i) => i.guid === lastGuid);
-  const fresh = idx === -1 ? items : items.slice(0, idx);
+  const seen = new Set(seenGuids);
+  if (!lastGuid && seen.size === 0) return [items[0]];
+  const fresh = items.filter((i) => !seen.has(i.guid) && i.guid !== lastGuid);
   return fresh.slice(0, 10).reverse();
 }

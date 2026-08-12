@@ -29,6 +29,7 @@ export interface User {
   timezone: string;
   plan: string; // 'free' | 'pro'
   stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
   plan_renews_at: string | null;
   signature: string;
   signature_enabled: boolean;
@@ -96,6 +97,7 @@ export interface Post {
   content: string;
   media: string[]; // jsonb array of media ids
   scheduled_at: string | null;
+  first_scheduled_at: string | null; // set once, when first scheduled — the quota timestamp
   status: PostStatus;
   comments: PostComment[]; // jsonb: [{content, delayMin}]
   repeat_every_days: number | null;
@@ -145,6 +147,7 @@ export interface RssFeed {
   interval_min: number;
   ai_caption: boolean;
   last_item_guid: string | null;
+  seen_guids: string[]; // jsonb — bounded history so truncated feeds can't repost
   last_polled_at: string | null;
   created_at: string;
 }
@@ -319,6 +322,25 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_targets_channel ON post_targets(channel_id);
   CREATE INDEX IF NOT EXISTS idx_targets_status ON post_targets(status, next_retry_at);
   CREATE INDEX IF NOT EXISTS idx_log_target ON publish_log(target_id);
+  -- Fault-fix pass: quota timestamp, dedupe, and query-aligned indexes.
+  ALTER TABLE posts ADD COLUMN IF NOT EXISTS first_scheduled_at timestamptz;
+  UPDATE posts SET first_scheduled_at = created_at WHERE first_scheduled_at IS NULL AND scheduled_at IS NOT NULL;
+  ALTER TABLE rss_feeds ADD COLUMN IF NOT EXISTS seen_guids jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+  -- One target per (post, channel) — dedupe legacy rows first so the unique index can build.
+  DELETE FROM post_targets a USING post_targets b
+    WHERE a.post_id = b.post_id AND a.channel_id = b.channel_id AND a.id > b.id;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_targets_post_channel ON post_targets(post_id, channel_id);
+  CREATE INDEX IF NOT EXISTS idx_posts_user_status_sched ON posts(user_id, status, scheduled_at);
+  CREATE INDEX IF NOT EXISTS idx_posts_quota ON posts(user_id, first_scheduled_at);
+  CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts USING GIN(tags);
+  CREATE INDEX IF NOT EXISTS idx_channels_user ON channels(user_id);
+  CREATE INDEX IF NOT EXISTS idx_media_user ON media(user_id);
+  CREATE INDEX IF NOT EXISTS idx_apikeys_user ON api_keys(user_id);
+  CREATE INDEX IF NOT EXISTS idx_users_stripe ON users(stripe_customer_id);
+  CREATE INDEX IF NOT EXISTS idx_rss_poll ON rss_feeds(last_polled_at);
+  CREATE INDEX IF NOT EXISTS idx_targets_published ON post_targets(published_at);
+  CREATE INDEX IF NOT EXISTS idx_log_at ON publish_log(at);
 `;
 
 const g = globalThis as unknown as { __postivoPool?: pg.Pool; __postivoSchema?: Promise<void> };
@@ -349,7 +371,7 @@ async function ensureSchema(): Promise<void> {
   return g.__postivoSchema;
 }
 
-export type SqlValue = string | number | boolean | null | Date;
+export type SqlValue = string | number | boolean | null | Date | string[];
 
 export async function query<T>(text: string, params: SqlValue[] = []): Promise<T[]> {
   await ensureSchema();
@@ -360,4 +382,32 @@ export async function query<T>(text: string, params: SqlValue[] = []): Promise<T
 export async function one<T>(text: string, params: SqlValue[] = []): Promise<T | undefined> {
   const rows = await query<T>(text, params);
   return rows[0];
+}
+
+export type TxQuery = <T>(text: string, params?: SqlValue[]) => Promise<T[]>;
+
+// Multi-statement mutations (post create/update/delete, quota check+insert)
+// run inside a real transaction on a single checked-out client.
+export async function withTransaction<T>(fn: (q: TxQuery) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const tq: TxQuery = async <R>(text: string, params: SqlValue[] = []) =>
+      (await client.query(text, params)).rows as R[];
+    const out = await fn(tq);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Per-user advisory lock (transaction-scoped): serializes quota check+insert
+// so concurrent requests can't race past plan limits.
+export async function lockUser(q: TxQuery, userId: string): Promise<void> {
+  await q('SELECT pg_advisory_xact_lock(hashtext($1))', [`quota:${userId}`]);
 }

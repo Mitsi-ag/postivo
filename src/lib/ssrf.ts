@@ -84,17 +84,42 @@ export async function assertPublicUrl(rawUrl: string): Promise<URL> {
   return url;
 }
 
+// Headers that must never leak to a redirect target on another origin.
+const SENSITIVE_HEADERS = ['authorization', 'x-postivo-secret', 'cookie', 'proxy-authorization'];
+
+function stripSensitiveHeaders(init: RequestInit): RequestInit {
+  const headers = new Headers(init.headers);
+  for (const h of SENSITIVE_HEADERS) headers.delete(h);
+  return { ...init, headers };
+}
+
 // fetch() with the SSRF guard applied to the URL and every redirect hop.
 // (A public URL that 302s to 169.254.169.254 must not be followed.)
+// Cross-origin redirects drop credentials and bodies — a webhook target must
+// not be able to bounce our Authorization/secret headers to a second host.
 export async function guardedFetch(rawUrl: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
   let current = rawUrl;
+  let currentInit = init;
   for (let hop = 0; ; hop++) {
     await assertPublicUrl(current);
-    const res = await fetch(current, { ...init, redirect: 'manual' });
+    const res = await fetch(current, { ...currentInit, redirect: 'manual' });
     const location = res.headers.get('location');
     if (res.status >= 300 && res.status < 400 && location) {
+      await res.body?.cancel().catch(() => {}); // release the socket
       if (hop >= maxRedirects) throw new Error('Too many redirects');
-      current = new URL(location, current).toString();
+      const next = new URL(location, current).toString();
+      if (new URL(next).origin !== new URL(current).origin) {
+        currentInit = stripSensitiveHeaders(currentInit);
+        if (res.status === 303 || ((res.status === 301 || res.status === 302) && currentInit.method === 'POST')) {
+          // Cross-origin POST → GET with no body (fetch spec redirect rules).
+          currentInit = { ...currentInit, method: 'GET', body: undefined };
+          const headers = new Headers(currentInit.headers);
+          headers.delete('content-type');
+          headers.delete('content-length');
+          currentInit = { ...currentInit, headers };
+        }
+      }
+      current = next;
       continue;
     }
     return res;

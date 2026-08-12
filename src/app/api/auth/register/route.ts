@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     await query('INSERT INTO users (id, email, password_hash, name, timezone) VALUES ($1,$2,$3,$4,$5)', [
       id,
       email,
-      hashPassword(body.password),
+      await hashPassword(body.password),
       (body.name ?? '').trim() || email.split('@')[0],
       (body.timezone ?? '').trim() || 'UTC',
     ]);

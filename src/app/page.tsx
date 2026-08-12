@@ -7,7 +7,7 @@ import Timeline from '@/components/Timeline';
 export const metadata: Metadata = {
   title: 'Postivo — Schedule everywhere. Self-host anywhere. One binary.',
   description:
-    'A radically simpler social media scheduler: 18 providers, threads, recurring posts, RSS automation, analytics and an agent-first API — in one stateless Next.js app.',
+    'A radically simpler social media scheduler: 16 platforms, threads, recurring posts, RSS automation, analytics and an agent-first API — in one stateless Next.js app.',
 };
 
 const COMPARISON = [
@@ -19,8 +19,17 @@ const COMPARISON = [
 ];
 
 const PROVIDERS = [
-  'X', 'Bluesky', 'Mastodon', 'LinkedIn', 'Telegram', 'Discord', 'Slack', 'Reddit',
-  'Pinterest', 'Hashnode', 'Medium', 'WordPress', 'DEV.to', 'Webhooks', 'Sandbox',
+  'Instagram', 'TikTok', 'YouTube', 'X', 'LinkedIn', 'Bluesky', 'Mastodon', 'Telegram',
+  'Discord', 'Slack', 'Reddit', 'Pinterest', 'Hashnode', 'Medium', 'WordPress', 'DEV.to',
+];
+
+const NAV_LINKS: [string, string][] = [
+  ['Features', '#features'],
+  ['The dial', '#timeline'],
+  ['API', '#api'],
+  ['Compare', '#compare'],
+  ['Pricing', '#pricing'],
+  ['FAQ', '#faq'],
 ];
 
 const FAQ = [
@@ -30,7 +39,7 @@ const FAQ = [
   },
   {
     q: 'Which platforms can I publish to?',
-    a: 'X, Bluesky, Mastodon, LinkedIn, Telegram, Discord, Slack, Reddit, Pinterest, Hashnode, Medium, WordPress, DEV.to, arbitrary webhooks (n8n/Zapier/Make), plus a sandbox channel for testing. Fifteen providers, one composer.',
+    a: 'Instagram, TikTok, YouTube, X, LinkedIn, Bluesky, Mastodon, Telegram, Discord, Slack, Reddit, Pinterest, Hashnode, Medium, WordPress and DEV.to — sixteen platforms, one composer — plus arbitrary webhooks (n8n/Zapier/Make) and a sandbox channel for testing.',
   },
   {
     q: 'What does the agent-first API look like?',
@@ -83,14 +92,7 @@ export default function Landing() {
             <Wordmark />
           </Link>
           <nav className="hidden items-center gap-7 text-[13px] text-mut md:flex" aria-label="Sections">
-            {[
-              ['Features', '#features'],
-              ['Timeline', '#timeline'],
-              ['API', '#api'],
-              ['Compare', '#compare'],
-              ['Pricing', '#pricing'],
-              ['FAQ', '#faq'],
-            ].map(([t, href]) => (
+            {NAV_LINKS.map(([t, href]) => (
               <a key={href} href={href} className="transition-colors hover:text-fg">
                 {t}
               </a>
@@ -106,6 +108,28 @@ export default function Landing() {
             >
               Get started
             </Link>
+            <details className="relative md:hidden">
+              <summary
+                aria-label="Open menu"
+                className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border border-line text-mut transition-colors hover:border-line2 hover:text-fg [&::-webkit-details-marker]:hidden"
+              >
+                <span aria-hidden className="text-base leading-none">☰</span>
+              </summary>
+              <nav
+                aria-label="Mobile sections"
+                className="absolute right-0 top-full mt-3 w-44 rounded-card border border-line bg-surface p-2 shadow-[0_16px_48px_rgba(0,0,0,.5)]"
+              >
+                {NAV_LINKS.map(([t, href]) => (
+                  <a
+                    key={href}
+                    href={href}
+                    className="block rounded-lg px-3 py-2 text-[13px] text-mut transition-colors hover:bg-raised hover:text-fg"
+                  >
+                    {t}
+                  </a>
+                ))}
+              </nav>
+            </details>
           </div>
         </div>
       </header>
@@ -126,11 +150,11 @@ export default function Landing() {
             </span>
           </div>
           <h1
-            className="anim-rise mx-auto mt-7 max-w-4xl font-display text-[42px] font-bold leading-[1.04] tracking-[-0.03em] text-fg sm:text-6xl"
+            className="anim-rise mx-auto mt-7 max-w-4xl text-balance font-display text-[42px] font-bold leading-[1.04] tracking-[-0.03em] text-fg sm:text-6xl"
             style={{ animationDelay: '90ms' }}
           >
             Schedule everywhere.
-            <br />
+            <br className="hidden sm:block" />
             Ship from <span className="text-iris-soft">one binary.</span>
           </h1>
           <p
@@ -146,14 +170,22 @@ export default function Landing() {
               href="/register"
               className="inline-flex items-center gap-2 rounded-lg bg-iris px-6 py-3 text-sm font-medium text-white shadow-[0_0_0_1px_rgba(110,107,240,.4),0_8px_28px_rgba(110,107,240,.35)] transition-all hover:bg-iris-deep hover:shadow-[0_0_0_1px_rgba(110,107,240,.55),0_10px_32px_rgba(110,107,240,.45)]"
             >
-              Start scheduling
+              Start free
               <ArrowRightIcon size={15} />
             </Link>
             <a
               href="#compare"
               className="rounded-lg border border-line px-6 py-3 text-sm font-medium text-mut transition-colors hover:border-line2 hover:bg-raised hover:text-fg"
             >
-              Why Postivo?
+              See the comparison
+            </a>
+            <a
+              href="https://github.com/Mitsi-ag/postivo"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-line px-6 py-3 text-sm font-medium text-mut transition-colors hover:border-line2 hover:bg-raised hover:text-fg"
+            >
+              View on GitHub
             </a>
           </div>
 
@@ -165,7 +197,12 @@ export default function Landing() {
 
         {/* Provider marquee */}
         <div className="relative border-y border-line bg-surface/40 py-5">
-          <div className="marquee-mask overflow-hidden" aria-label="Supported providers">
+          <ul className="sr-only">
+            {PROVIDERS.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+          <div className="marquee-mask overflow-hidden" aria-hidden="true">
             <div className="animate-marquee flex w-max items-center gap-3 px-6">
               {[...PROVIDERS, ...PROVIDERS].map((name, i) => (
                 <span
@@ -188,22 +225,25 @@ export default function Landing() {
           sub="Without the six-container docker-compose file."
         />
         <div className="mt-14 grid gap-4 lg:grid-cols-12">
-          {/* Large: 18 providers */}
+          {/* Large: 16 platforms */}
           <div className="edge-top lift rounded-card border border-line bg-surface p-7 lg:col-span-7">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-iris/25 bg-iris/10 text-iris-soft">
               <PlugIcon size={17} />
             </div>
-            <h3 className="mt-5 font-display text-lg font-semibold text-fg">18 providers, one composer</h3>
+            <h3 className="mt-5 font-display text-lg font-semibold text-fg">16 platforms, one composer</h3>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-mut">
               Compose once, publish everywhere — with per-channel overrides and live per-platform
-              previews that show exactly what ships.
+              previews that show exactly what ships. Webhooks cover anything else.
             </p>
             <div className="mt-6 flex flex-wrap gap-1.5">
-              {PROVIDERS.map((p) => (
+              {PROVIDERS.slice(0, 6).map((p) => (
                 <span key={p} className="rounded-md border border-line bg-raised/50 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-dim">
                   {p}
                 </span>
               ))}
+              <span className="rounded-md border border-line bg-raised/50 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-dim">
+                + 10 more
+              </span>
             </div>
           </div>
           {/* Large: agent API */}
@@ -297,7 +337,24 @@ Authorization: Bearer pv_…
           title="Postiz vs Postivo"
           sub="Same job. A tenth of the moving parts."
         />
-        <div className="edge-top mx-auto mt-14 max-w-4xl overflow-x-auto rounded-card border border-line bg-surface">
+        {/* Stacked cards below sm — Postivo first, no horizontal scroll */}
+        <div className="mx-auto mt-14 max-w-4xl space-y-3 sm:hidden">
+          {COMPARISON.map((row) => (
+            <div key={row.label} className="edge-top rounded-card border border-line bg-surface p-5">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-dim">{row.label}</p>
+              <p className="mt-3 flex items-start gap-2 text-[13px] leading-relaxed text-fg">
+                <CheckIcon size={14} className="mt-0.5 shrink-0 text-iris" />
+                {row.postivo}
+              </p>
+              <p className="mt-2 flex items-start gap-2 text-[13px] leading-relaxed text-dim">
+                <span className="mt-0.5 shrink-0" aria-hidden>—</span>
+                {row.postiz}
+              </p>
+            </div>
+          ))}
+        </div>
+        {/* Table on sm+ */}
+        <div className="edge-top mx-auto mt-14 hidden max-w-4xl overflow-x-auto rounded-card border border-line bg-surface sm:block">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-line text-left">
@@ -310,7 +367,12 @@ Authorization: Bearer pv_…
               {COMPARISON.map((row) => (
                 <tr key={row.label} className="border-b border-line/60 last:border-0">
                   <td className="px-5 py-4 font-medium text-fg">{row.label}</td>
-                  <td className="px-5 py-4 text-[13px] leading-relaxed text-dim">{row.postiz}</td>
+                  <td className="px-5 py-4 text-[13px] leading-relaxed text-dim">
+                    <span className="flex items-start gap-2">
+                      <span className="mt-0.5 shrink-0" aria-hidden>—</span>
+                      {row.postiz}
+                    </span>
+                  </td>
                   <td className="bg-iris/5 px-5 py-4 text-[13px] leading-relaxed text-fg">
                     <span className="flex items-start gap-2">
                       <CheckIcon size={14} className="mt-0.5 shrink-0 text-iris" />
@@ -329,8 +391,8 @@ Authorization: Bearer pv_…
         <SectionHead
           center
           kicker="04 — Pricing"
-          title="Free to self-host forever"
-          sub="Pro when you scale. No credit card required to start."
+          title="Self-host free. Or let us run it."
+          sub="Self-hosting is MIT-licensed with no limits. Postivo Cloud starts free — Free tier limits apply, and Pro ($9/mo) removes them."
         />
         <div className="mx-auto mt-14 grid max-w-3xl items-start gap-5 sm:grid-cols-2">
           {/* Free */}
@@ -340,7 +402,7 @@ Authorization: Bearer pv_…
               $0<span className="font-sans text-sm font-normal text-dim"> / forever</span>
             </p>
             <ul className="mt-6 space-y-2.5 border-t border-line pt-6 text-sm text-mut">
-              {['3 connected channels', '30 scheduled posts / month', 'Calendar, queue, analytics & RSS', 'Agent API with Bearer keys'].map((f) => (
+              {['3 connected channels', '30 scheduled posts / month', '250 MB media storage', 'Calendar, queue, analytics & RSS', 'Agent API with Bearer keys'].map((f) => (
                 <li key={f} className="flex items-start gap-2.5">
                   <CheckIcon size={14} className="mt-0.5 shrink-0 text-mut" />
                   {f}
@@ -359,8 +421,8 @@ Authorization: Bearer pv_…
             </Link>
           </div>
           {/* Pro */}
-          <div className="edge-top edge-top-iris lift relative rounded-card border border-iris/40 bg-surface p-7 shadow-[0_0_60px_rgba(110,107,240,.14)]">
-            <span className="absolute -top-3 right-5 rounded-full bg-iris px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-white">
+          <div className="edge-top edge-top-iris lift relative mt-4 rounded-card border border-iris/40 bg-surface p-7 shadow-[0_0_60px_rgba(110,107,240,.14)] sm:mt-0">
+            <span className="absolute -top-2 right-5 rounded-full bg-iris px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-white sm:-top-3">
               Most popular
             </span>
             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-iris-soft">Pro</p>
@@ -368,7 +430,7 @@ Authorization: Bearer pv_…
               $9<span className="font-sans text-sm font-normal text-dim"> / month</span>
             </p>
             <ul className="mt-6 space-y-2.5 border-t border-line pt-6 text-sm text-mut">
-              {['100 connected channels', '10,000 scheduled posts / month', 'AI caption generation', 'Everything in Free', 'Priority support'].map((f) => (
+              {['100 connected channels', '10,000 scheduled posts / month', '25 GB media storage', 'AI caption generation', 'Everything in Free', 'Priority support'].map((f) => (
                 <li key={f} className="flex items-start gap-2.5">
                   <CheckIcon size={14} className="mt-0.5 shrink-0 text-iris" />
                   {f}
@@ -391,7 +453,7 @@ Authorization: Bearer pv_…
         <div className="mt-12">
           {FAQ.map((f) => (
             <details key={f.q} className="group border-b border-line">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 text-[15px] font-medium text-fg transition-colors hover:text-iris-soft [&::-webkit-details-marker]:hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg py-5 text-[15px] font-medium text-fg transition-colors hover:text-iris-soft focus-visible:ring-2 focus-visible:ring-iris-soft [&::-webkit-details-marker]:hidden">
                 {f.q}
                 <span aria-hidden className="shrink-0 text-dim transition-transform duration-200 group-open:rotate-45">
                   +
@@ -424,7 +486,7 @@ Authorization: Bearer pv_…
             href="/register"
             className="mt-10 inline-flex items-center gap-2 rounded-lg bg-iris px-7 py-3.5 text-sm font-medium text-white shadow-[0_0_0_1px_rgba(110,107,240,.4),0_8px_28px_rgba(110,107,240,.35)] transition-colors hover:bg-iris-deep"
           >
-            Create your account
+            Start free
             <ArrowRightIcon size={15} />
           </Link>
         </div>
@@ -443,6 +505,14 @@ Authorization: Bearer pv_…
             <Link href="/privacy" className="transition-colors hover:text-mut">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-mut">Terms</Link>
             <Link href="/support" className="transition-colors hover:text-mut">Support</Link>
+            <a
+              href="https://github.com/Mitsi-ag/postivo"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-colors hover:text-mut"
+            >
+              GitHub ↗
+            </a>
             <Link href="/login" className="transition-colors hover:text-mut">Log in</Link>
           </nav>
         </div>

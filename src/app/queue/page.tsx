@@ -5,7 +5,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
 import { CommentIcon, EyeIcon, ExternalIcon, HeartIcon, PenIcon, RefreshIcon, RepostIcon, StackIcon } from '@/components/icons';
-import { Badge, btnDanger, btnGhost, cardCls, EmptyState, ErrorBanner, selectCls, SkeletonCards, TagChip } from '@/components/ui';
+import { Badge, btnDanger, btnGhost, cardCls, ConfirmDialog, EmptyState, ErrorBanner, selectCls, SkeletonCards, TagChip } from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import type { ChannelDTO, PostDTO, TargetDTO } from '@/lib/types';
 
@@ -15,6 +15,14 @@ const TABS = [
   { key: 'failed', label: 'Failed' },
   { key: 'drafts', label: 'Drafts' },
 ] as const;
+
+// Per-tab empty states. Failed gets no compose CTA — there is nothing to fix by writing more.
+const TAB_EMPTY: Record<string, { title: string; hint: string; compose: boolean }> = {
+  scheduled: { title: 'Nothing scheduled', hint: 'Posts you schedule will queue up here.', compose: true },
+  published: { title: 'Nothing published yet', hint: 'Published posts land here with per-channel results and stats.', compose: true },
+  failed: { title: 'No failures', hint: 'Every post went out cleanly. Failures show up here with the exact platform error.', compose: false },
+  drafts: { title: 'No drafts', hint: 'Save a draft from the composer and it will wait here.', compose: true },
+};
 
 function StatRow({ stats }: { stats: Record<string, number> }) {
   const items: { Icon: typeof HeartIcon; n: number }[] = [];
@@ -57,6 +65,8 @@ function QueueInner() {
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const [pendingDelete, setPendingDelete] = useState<PostDTO | null>(null);
 
   const load = useCallback((t: string, tag: string) => {
     setLoading(true);
@@ -71,6 +81,19 @@ function QueueInner() {
   }, []);
 
   useEffect(() => load(tab, tagFilter), [tab, tagFilter, load]);
+
+  // Tab counts — one cheap fetch per tab, refreshed alongside every load/action.
+  const loadCounts = useCallback(() => {
+    Promise.all(
+      TABS.map((t) =>
+        api<{ posts: PostDTO[] }>(`/api/queue?tab=${t.key}`)
+          .then((d) => [t.key, d.posts.length] as const)
+          .catch(() => [t.key, null] as const),
+      ),
+    ).then((entries) => setCounts(Object.fromEntries(entries)));
+  }, []);
+
+  useEffect(() => loadCounts(), [loadCounts, posts]);
 
   // Populate tag + channel filter dropdowns once.
   useEffect(() => {
@@ -102,40 +125,51 @@ function QueueInner() {
     }
   }
 
+  function switchTab(key: string) {
+    setTab(key);
+    router.replace(`/queue?tab=${key}`, { scroll: false });
+  }
+
+  const filtering = Boolean(search || tagFilter || channelFilter);
+
   return (
     <Portal title="Queue">
       <div className="mx-auto max-w-4xl space-y-5">
         <ErrorBanner message={error} />
-        <div className="flex gap-1 rounded-xl border border-line bg-surface p-1" role="tablist">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
-                tab === t.key ? 'bg-iris font-medium text-fg' : 'text-mut hover:text-fg'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="inline-flex max-w-full gap-1 rounded-xl border border-line bg-surface p-1" role="tablist">
+          {TABS.map((t) => {
+            const n = counts[t.key];
+            return (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => switchTab(t.key)}
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  tab === t.key ? 'bg-iris-fill font-medium text-white' : 'text-mut hover:text-fg'
+                }`}
+              >
+                {t.label}
+                {n != null && <span className="ml-1.5 font-mono text-[11px] opacity-80">{n}</span>}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Filter bar */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Filter bar — 2-col grid on mobile, flex row from sm up */}
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search content…"
             aria-label="Search posts"
-            className={`${selectCls} w-44 text-xs`}
+            className={`${selectCls} w-full text-xs sm:w-44`}
           />
           <select
             aria-label="Filter by tag"
             value={tagFilter}
             onChange={(e) => setTagFilter(e.target.value)}
-            className={`${selectCls} w-auto text-xs`}
+            className={`${selectCls} w-full text-xs sm:w-auto`}
           >
             <option value="">All tags</option>
             {allTags.map((t) => (
@@ -148,7 +182,7 @@ function QueueInner() {
             aria-label="Filter by channel"
             value={channelFilter}
             onChange={(e) => setChannelFilter(e.target.value)}
-            className={`${selectCls} w-auto text-xs`}
+            className={`${selectCls} w-full text-xs sm:w-auto`}
           >
             <option value="">All channels</option>
             {channels.map((c) => (
@@ -174,28 +208,45 @@ function QueueInner() {
         {loading ? (
           <SkeletonCards count={3} height="h-28" />
         ) : visible.length === 0 ? (
-          <EmptyState
-            icon={<StackIcon size={18} />}
-            title={posts.length === 0 ? 'Nothing here yet' : 'No posts match your filters'}
-            hint={posts.length === 0 ? 'Compose a post and it will show up in your queue.' : 'Try clearing the filters above.'}
-            action={
-              posts.length === 0 ? (
-                <button onClick={() => router.push('/compose')} className={btnGhost}>
-                  <PenIcon size={14} />
-                  Compose a post
-                </button>
-              ) : undefined
-            }
-          />
+          posts.length === 0 && !filtering ? (
+            <EmptyState
+              icon={<StackIcon size={18} />}
+              title={TAB_EMPTY[tab]?.title ?? 'Nothing here yet'}
+              hint={TAB_EMPTY[tab]?.hint}
+              action={
+                TAB_EMPTY[tab]?.compose ? (
+                  <button onClick={() => router.push('/compose')} className={btnGhost}>
+                    <PenIcon size={14} />
+                    Compose a post
+                  </button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={<StackIcon size={18} />}
+              title="No posts match your filters"
+              hint="Try clearing the filters above."
+            />
+          )
         ) : (
           <div className="space-y-4">
-            {visible.map((p) => (
+            {visible.map((p) => {
+              const overdue =
+                p.status === 'scheduled' &&
+                Boolean(p.scheduled_at) &&
+                new Date(p.scheduled_at as string).getTime() < Date.now();
+              return (
               <div key={p.id} className={cardCls}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="whitespace-pre-wrap text-sm text-fg">{p.content || '(media only)'}</p>
                     <p className="mt-1.5 text-xs text-dim">
-                      {p.status === 'scheduled' ? `Scheduled for ${formatDate(p.scheduled_at)}` : `Updated ${formatDate(p.updated_at)}`}
+                      {overdue
+                        ? `Was due ${formatDate(p.scheduled_at)}`
+                        : p.status === 'scheduled'
+                          ? `Scheduled for ${formatDate(p.scheduled_at)}`
+                          : `Updated ${formatDate(p.updated_at)}`}
                       {p.media.length > 0 && ` · ${p.media.length} media`}
                       {p.repeat_every_days && (
                         <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-1.5 py-0.5 font-mono text-[10px] text-ok">
@@ -218,7 +269,7 @@ function QueueInner() {
                       </div>
                     )}
                   </div>
-                  <Badge status={p.status} />
+                  {overdue ? <Badge status="overdue" /> : <Badge status={p.status} />}
                 </div>
 
                 {p.targets.length > 0 && (
@@ -273,22 +324,34 @@ function QueueInner() {
                       Cancel schedule
                     </button>
                   )}
-                  <button
-                    onClick={() => {
-                      if (window.confirm('Delete this post?')) {
-                        void act(() => api(`/api/posts/${p.id}`, { method: 'DELETE' }), 'Post deleted');
-                      }
-                    }}
-                    className={btnDanger}
-                  >
+                  <button onClick={() => setPendingDelete(p)} className={btnDanger}>
                     Delete
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete this post?"
+        body={
+          pendingDelete
+            ? `“${(pendingDelete.content || '(media only)').slice(0, 120)}” will be permanently removed.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          const p = pendingDelete;
+          setPendingDelete(null);
+          if (p) void act(() => api(`/api/posts/${p.id}`, { method: 'DELETE' }), 'Post deleted');
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </Portal>
   );
 }

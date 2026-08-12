@@ -120,15 +120,27 @@ async function claimDue(): Promise<DueRow[]> {
   );
 }
 
+// Process claimed targets with bounded concurrency: sequentially, 10 targets
+// × 90s worst case would outlive the 5-minute claim lease and a replica could
+// re-claim the tail — publishing duplicates. 4-way keeps the batch ≤ ~4 min.
+const PUBLISH_CONCURRENCY = 4;
+
+async function mapPool<T>(items: T[], size: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (i < items.length) {
+      const item = items[i++];
+      await fn(item).catch((err) => console.error('[postivo] worker error:', err));
+    }
+  });
+  await Promise.all(workers);
+}
+
 async function tick(): Promise<void> {
   const due = await claimDue();
-  for (const row of due) {
-    await processTarget(row);
-  }
+  await mapPool(due, PUBLISH_CONCURRENCY, processTarget);
   const comments = await claimDueComments();
-  for (const row of comments) {
-    await processComment(row);
-  }
+  await mapPool(comments, PUBLISH_CONCURRENCY, processComment);
   await pollRssFeeds();
   await sweepOrphanedPosts();
 }
@@ -193,26 +205,42 @@ async function processTarget(row: DueRow): Promise<void> {
     }
     const content = withSignature(row.content_override ?? row.content, provider.maxLength, row.signature, row.signature_enabled);
     const creds = decryptChannelCredentials(channel);
-    const result = await withTimeout(
-      provider.publish(channel, creds, content, mediaUrls, {
-        postId: row.post_id,
-        scheduledAt: row.scheduled_at,
-      }),
-      PUBLISH_TIMEOUT_MS,
-      `Publishing to ${provider.id} timed out`,
-    );
-    await query(
-      `UPDATE post_targets SET status = 'published', published_at = now(), error = NULL, external_url = $1, external_id = $2 WHERE id = $3`,
-      [result.externalUrl ?? null, result.externalId ?? null, row.id],
-    );
-    await log(row.id, 'info', `Published to ${channel.name} (${provider.id})`);
-    await scheduleComments(row, row.comments);
-    fireOutbound(row.outbound_webhook_url, {
-      event: 'post.published',
-      post_id: row.post_id,
-      channel: provider.id,
-      external_url: result.externalUrl ?? null,
-    });
+    let result;
+    try {
+      // ONLY the external publish lives in this try — a provider error here
+      // means the post (probably) didn't go out and is safe to retry.
+      result = await withTimeout(
+        provider.publish(channel, creds, content, mediaUrls, {
+          postId: row.post_id,
+          scheduledAt: row.scheduled_at,
+        }),
+        PUBLISH_TIMEOUT_MS,
+        `Publishing to ${provider.id} timed out`,
+      );
+    } catch (err) {
+      throw err; // handled by the outer catch: retry ladder / permanent fail
+    }
+    // Bookkeeping AFTER a successful publish must never bounce the target
+    // back to pending — that would re-publish content that already went out.
+    // A failure here is logged loudly but the publish stands.
+    try {
+      await query(
+        `UPDATE post_targets SET status = 'published', published_at = now(), error = NULL, external_url = $1, external_id = $2 WHERE id = $3`,
+        [result.externalUrl ?? null, result.externalId ?? null, row.id],
+      );
+      await log(row.id, 'info', `Published to ${channel.name} (${provider.id})`);
+      await scheduleComments(row, row.comments);
+      fireOutbound(row.outbound_webhook_url, {
+        event: 'post.published',
+        post_id: row.post_id,
+        channel: provider.id,
+        external_url: result.externalUrl ?? null,
+      });
+    } catch (bookkeepingErr) {
+      console.error(`[postivo] CRITICAL: published target ${row.id} but bookkeeping failed (target may be stuck 'publishing' until the watchdog):`, bookkeepingErr);
+    }
+    await refreshPostStatus(row.post_id);
+    return;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Plan-limit failures skip the retry ladder: they fail permanently right
@@ -284,14 +312,15 @@ async function cloneRecurring(postId: string): Promise<void> {
   const cloneId = crypto.randomUUID();
   const scheduledAt = new Date(Date.now() + post.repeat_every_days * 86_400_000).toISOString();
   await query(
-    `INSERT INTO posts (id, user_id, content, media, scheduled_at, status, comments, repeat_every_days, tags)
-     VALUES ($1,$2,$3,$4,$5,'scheduled',$6,$7,$8)`,
+    `INSERT INTO posts (id, user_id, content, media, scheduled_at, first_scheduled_at, status, comments, repeat_every_days, tags)
+     VALUES ($1,$2,$3,$4,$5,$6,'scheduled',$7,$8,$9)`,
     [
       cloneId,
       post.user_id,
       post.content,
       JSON.stringify(Array.isArray(post.media) ? post.media : []),
       scheduledAt,
+      new Date().toISOString(),
       JSON.stringify(Array.isArray(post.comments) ? post.comments : []),
       post.repeat_every_days,
       JSON.stringify(Array.isArray(post.tags) ? post.tags : []),
@@ -373,11 +402,16 @@ async function processComment(row: DueComment): Promise<void> {
         `Publishing to ${provider.id} timed out`,
       );
     }
-    await query(
-      `UPDATE post_targets_comments SET status = 'published', published_at = now(), error = NULL, external_id = $1 WHERE id = $2`,
-      [result.externalId ?? null, row.id],
-    );
-    await log(row.target_id, 'info', `Published comment #${row.idx + 1} to ${channel.name} (${provider.id})`);
+    // The comment went out — bookkeeping failures must not re-publish it.
+    try {
+      await query(
+        `UPDATE post_targets_comments SET status = 'published', published_at = now(), error = NULL, external_id = $1 WHERE id = $2`,
+        [result.externalId ?? null, row.id],
+      );
+      await log(row.target_id, 'info', `Published comment #${row.idx + 1} to ${channel.name} (${provider.id})`);
+    } catch (bookkeepingErr) {
+      console.error(`[postivo] CRITICAL: published comment ${row.id} but bookkeeping failed:`, bookkeepingErr);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const attempts = row.retry_count + 1;
@@ -453,14 +487,21 @@ async function processFeed(feed: RssFeed): Promise<void> {
   if (items.length === 0) {
     console.error(`[postivo] rss feed ${feed.id} (${feed.url}): fetched OK but parsed 0 items (malformed or empty feed?)`);
   }
-  const fresh = newItems(items, feed.last_item_guid);
+  const fresh = newItems(items, feed.last_item_guid, Array.isArray(feed.seen_guids) ? feed.seen_guids : []);
   const channelIds = Array.isArray(feed.channel_ids) ? feed.channel_ids : [];
 
   for (const item of fresh) {
     let content = `${item.title}\n\n${item.link}`.trim();
+    // Check the monthly quota BEFORE spending an AI caption on an item that
+    // can't be scheduled anyway.
+    const plan = planOf(user);
+    if ((await postsThisMonth(user.id)) >= plan.postsPerMonth) {
+      console.log(`[postivo] rss feed ${feed.id}: monthly quota reached — skipping remaining items`);
+      break;
+    }
     // ai_caption is a Pro feature — enforce at poll time too (a downgraded
     // user's feeds silently fall back to the raw item text).
-    if (feed.ai_caption && planOf(user).aiCaptions) content = await generateCaption(content);
+    if (feed.ai_caption && plan.aiCaptions) content = await generateCaption(content);
     const result = await createPost(user, {
       content,
       scheduled_at: new Date().toISOString(),
@@ -475,8 +516,14 @@ async function processFeed(feed: RssFeed): Promise<void> {
       console.log(`[postivo] rss feed ${feed.id}: scheduled "${item.title.slice(0, 60)}" (${result.post?.id})`);
     }
   }
+  // Persist a bounded seen-history (200 guids) alongside the last-guid marker.
   const newest = items[0]?.guid ?? feed.last_item_guid;
-  if (newest && newest !== feed.last_item_guid) {
-    await query('UPDATE rss_feeds SET last_item_guid = $1 WHERE id = $2', [newest, feed.id]);
-  }
+  const seen = [...fresh.map((i) => i.guid), ...(Array.isArray(feed.seen_guids) ? feed.seen_guids : [])]
+    .filter(Boolean)
+    .slice(0, 200);
+  await query('UPDATE rss_feeds SET last_item_guid = $1, seen_guids = $2 WHERE id = $3', [
+    newest,
+    JSON.stringify([...new Set(seen)]),
+    feed.id,
+  ]);
 }

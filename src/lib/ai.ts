@@ -35,6 +35,8 @@ export async function openaiCaptionSuggestions(content: string): Promise<string[
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      // A stalled LLM provider must not hang the scheduler's RSS phase.
+      signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         model,
         temperature: 0.8,

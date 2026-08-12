@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import Portal from '@/components/Portal';
 import { useToast } from '@/components/toast';
@@ -23,11 +24,13 @@ export default function AnalyticsPage() {
   const [rows, setRows] = useState<StatsRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const load = useCallback(() => {
     Promise.all([api<AnalyticsDTO>('/api/analytics'), api<{ posts: PostDTO[] }>('/api/queue?tab=published')])
       .then(([a, q]) => {
         setData(a);
+        setLastRefresh(new Date());
         const out: StatsRow[] = [];
         for (const p of q.posts) {
           for (const t of p.targets) {
@@ -68,7 +71,16 @@ export default function AnalyticsPage() {
   }
 
   const maxProvider = Math.max(1, ...(data?.byProvider.map((p) => p.count) ?? [1]));
-  const maxDay = Math.max(1, ...(data?.last14Days.map((d) => d.count) ?? [1]));
+  const dayMax = Math.max(0, ...(data?.last14Days.map((d) => d.count) ?? [0]));
+  const maxDay = Math.max(1, dayMax);
+
+  function timeAgo(d: Date): string {
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
+  }
 
   const engagement = data?.engagement;
   const engagementCards = [
@@ -102,8 +114,8 @@ export default function AnalyticsPage() {
                 { label: 'Failed', value: data.totals.failed },
               ].map((s) => (
                 <div key={s.label} className={cardCls}>
-                  <div className="font-mono text-[28px] font-medium leading-none tracking-tight text-fg">{s.value}</div>
-                  <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{s.label}</div>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{s.label}</span>
+                  <div className="mt-3 font-mono text-[28px] font-medium leading-none tracking-tight text-fg">{s.value}</div>
                 </div>
               ))}
             </div>
@@ -112,14 +124,19 @@ export default function AnalyticsPage() {
             <div className={cardCls}>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-semibold text-fg">Engagement</h2>
-                <button
-                  onClick={() => void refresh()}
-                  disabled={refreshBusy}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50"
-                >
-                  <RefreshIcon size={12} />
-                  {refreshBusy ? 'Refreshing…' : 'Refresh stats'}
-                </button>
+                <div className="flex items-center gap-3">
+                  {lastRefresh && (
+                    <span className="font-mono text-[10px] text-dim">Updated {timeAgo(lastRefresh)}</span>
+                  )}
+                  <button
+                    onClick={() => void refresh()}
+                    disabled={refreshBusy}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs text-mut transition-colors hover:border-line2 hover:bg-raised disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50"
+                  >
+                    <RefreshIcon size={12} />
+                    {refreshBusy ? 'Refreshing…' : 'Refresh stats'}
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 {engagementCards.map((s) => (
@@ -137,6 +154,13 @@ export default function AnalyticsPage() {
                 <h2 className="mb-4 font-semibold text-fg">Published by provider</h2>
                 {data.byProvider.length === 0 ? (
                   <p className="text-sm text-dim">No published posts yet.</p>
+                ) : data.byProvider.length === 1 ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-fg">{data.byProvider[0].provider}</span>
+                    <span className="font-mono text-[28px] font-medium leading-none tracking-tight text-fg">
+                      {data.byProvider[0].count}
+                    </span>
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     {data.byProvider.map((p) => (
@@ -159,21 +183,36 @@ export default function AnalyticsPage() {
 
               <div className={cardCls}>
                 <h2 className="mb-4 font-semibold text-fg">Publishes — last 14 days</h2>
-                <div className="flex h-32 items-end gap-1.5">
-                  {data.last14Days.map((d) => (
-                    <div key={d.date} className="group flex flex-1 flex-col items-center justify-end">
-                      <span className="mb-1 text-[10px] text-dim opacity-0 group-hover:opacity-100">
-                        {d.count}
-                      </span>
+                {dayMax === 0 ? (
+                  <p className="text-sm text-dim">No publishes in the last 14 days</p>
+                ) : (
+                  <div className="flex h-32 items-end gap-1.5 border-b border-line">
+                    {data.last14Days.map((d, i) => (
                       <div
-                        className="w-full rounded-t bg-iris/80"
-                        style={{ height: `${Math.max(d.count > 0 ? 6 : 2, (d.count / maxDay) * 100)}%` }}
-                        title={`${d.date}: ${d.count}`}
-                      />
-                      <span className="mt-1 text-[9px] text-dim">{d.date.slice(5)}</span>
-                    </div>
-                  ))}
-                </div>
+                        key={d.date}
+                        tabIndex={0}
+                        aria-label={`${d.date}: ${d.count} publishes`}
+                        className="group flex flex-1 flex-col items-center justify-end focus-visible:outline-none"
+                      >
+                        <span className="mb-1 text-[10px] text-dim opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                          {d.count}
+                        </span>
+                        {d.count > 0 ? (
+                          <div
+                            className="w-full rounded-t bg-iris/80"
+                            style={{ height: `${Math.max(6, (d.count / maxDay) * 100)}%` }}
+                            title={`${d.date}: ${d.count}`}
+                          />
+                        ) : (
+                          <div className="h-px w-full bg-line2" title={`${d.date}: 0`} />
+                        )}
+                        <span className="mt-1 whitespace-nowrap text-[9px] text-dim">
+                          {i % 3 === 0 ? d.date.slice(8) : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -193,10 +232,26 @@ export default function AnalyticsPage() {
                       <tr className="border-b border-line text-dim">
                         <th className="py-2 pr-3 font-medium">Post</th>
                         <th className="py-2 pr-3 font-medium">Channel</th>
-                        <th className="py-2 pr-3 text-right font-medium"><HeartIcon size={11} className="ml-auto" /></th>
-                        <th className="py-2 pr-3 text-right font-medium"><RepostIcon size={11} className="ml-auto" /></th>
-                        <th className="py-2 pr-3 text-right font-medium"><CommentIcon size={11} className="ml-auto" /></th>
-                        <th className="py-2 pr-3 text-right font-medium"><EyeIcon size={11} className="ml-auto" /></th>
+                        <th className="py-2 pr-3 text-right font-medium" title="Likes">
+                          <HeartIcon size={11} className="ml-auto" />
+                          <span className="sr-only">Likes</span>
+                        </th>
+                        <th className="py-2 pr-3 text-right font-medium" title="Reposts">
+                          <RepostIcon size={11} className="ml-auto" />
+                          <span className="sr-only">Reposts</span>
+                        </th>
+                        <th className="py-2 pr-3 text-right font-medium" title="Replies">
+                          <CommentIcon size={11} className="ml-auto" />
+                          <span className="sr-only">Replies</span>
+                        </th>
+                        <th className="py-2 pr-3 text-right font-medium" title="Views">
+                          <EyeIcon size={11} className="ml-auto" />
+                          <span className="sr-only">Views</span>
+                        </th>
+                        <th className="py-2 pr-3 text-right font-medium" title="Comments">
+                          <CommentIcon size={11} className="ml-auto" />
+                          <span className="sr-only">Comments</span>
+                        </th>
                         <th className="py-2 font-medium">Published</th>
                       </tr>
                     </thead>
@@ -204,15 +259,19 @@ export default function AnalyticsPage() {
                       {rows.map((r, i) => (
                         <tr key={`${r.postId}-${i}`}>
                           <td className="max-w-48 truncate py-2.5 pr-3 text-fg" title={r.content}>
-                            {r.content || '(media only)'}
+                            <Link
+                              href={`/compose?post=${r.postId}`}
+                              className="transition-colors hover:text-iris-soft"
+                            >
+                              {r.content || '(media only)'}
+                            </Link>
                           </td>
                           <td className="py-2.5 pr-3 text-mut">{r.channel}</td>
                           <td className="py-2.5 pr-3 text-right text-fg">{r.stats.likes ?? 0}</td>
                           <td className="py-2.5 pr-3 text-right text-fg">{r.stats.reposts ?? 0}</td>
-                          <td className="py-2.5 pr-3 text-right text-fg">
-                            {(r.stats.replies ?? 0) + (r.stats.comments ?? 0)}
-                          </td>
+                          <td className="py-2.5 pr-3 text-right text-fg">{r.stats.replies ?? 0}</td>
                           <td className="py-2.5 pr-3 text-right text-fg">{r.stats.views ?? 0}</td>
+                          <td className="py-2.5 pr-3 text-right text-fg">{r.stats.comments ?? 0}</td>
                           <td className="py-2.5 text-dim">{formatDate(r.publishedAt)}</td>
                         </tr>
                       ))}

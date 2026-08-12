@@ -1,8 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
-import { btnDanger, btnPrimary, cardCls, ErrorBanner, inputCls } from '@/components/ui';
+import {
+  btnDanger,
+  btnPrimary,
+  cardCls,
+  ConfirmDialog,
+  ErrorBanner,
+  inputCls,
+  SavedNote,
+  selectCls,
+} from '@/components/ui';
 import { api, formatDate } from '@/lib/client';
 import { useRequireAuth } from '@/lib/useRequireAuth';
 import type { ApiKeyDTO } from '@/lib/types';
@@ -27,9 +36,14 @@ export default function SettingsPage() {
   const [keys, setKeys] = useState<ApiKeyDTO[]>([]);
   const [keyName, setKeyName] = useState('');
   const [createdKey, setCreatedKey] = useState<CreatedKey | null>(null);
+  const [keyCopied, setKeyCopied] = useState(false);
 
   const [deletePassword, setDeletePassword] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  const timezones = useMemo(() => Intl.supportedValuesOf('timeZone'), []);
+  const detectedTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -87,10 +101,21 @@ export default function SettingsPage() {
         json: { name: keyName },
       });
       setCreatedKey(d.key);
+      setKeyCopied(false);
       setKeyName('');
       loadKeys();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Key creation failed');
+    }
+  }
+
+  async function copyKey(token: string) {
+    try {
+      await navigator.clipboard.writeText(token);
+      setKeyCopied(true);
+      setTimeout(() => setKeyCopied(false), 2000);
+    } catch {
+      setError('Copy failed — select the key text manually');
     }
   }
 
@@ -118,11 +143,13 @@ export default function SettingsPage() {
     URL.revokeObjectURL(a.href);
   }
 
-  async function deleteAccount(e: React.FormEvent) {
+  function requestDelete(e: React.FormEvent) {
     e.preventDefault();
-    if (!window.confirm('Permanently delete your account and ALL data (posts, channels, media)? This cannot be undone.')) {
-      return;
-    }
+    setConfirmDelete(true);
+  }
+
+  async function deleteAccount() {
+    setConfirmDelete(false);
     setDeleting(true);
     setError(null);
     try {
@@ -141,20 +168,42 @@ export default function SettingsPage() {
 
         <form onSubmit={saveProfile} className={`${cardCls} space-y-3`}>
           <h2 className="font-semibold text-fg">Profile</h2>
-          {profileMsg && <p className="text-xs text-ok">{profileMsg}</p>}
+          <SavedNote message={profileMsg} />
           <div>
             <label htmlFor="profile-name" className="mb-1 block text-xs font-medium text-mut">Name</label>
             <input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
           </div>
           <div>
             <label htmlFor="profile-timezone" className="mb-1 block text-xs font-medium text-mut">Timezone</label>
-            <input
+            <select
               id="profile-timezone"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
-              className={inputCls}
-              placeholder="Australia/Sydney"
-            />
+              className={`${selectCls} w-full`}
+            >
+              {!timezone && <option value="" disabled>Pick a timezone…</option>}
+              {timezone && !timezones.includes(timezone) && <option value={timezone}>{timezone}</option>}
+              {timezones.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-dim">
+              Detected: <span className="font-mono text-mut">{detectedTz}</span>
+              {detectedTz !== timezone && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => setTimezone(detectedTz)}
+                    className="text-iris-soft transition-colors hover:text-iris focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris-soft"
+                  >
+                    Use this
+                  </button>
+                </>
+              )}
+            </p>
           </div>
           <button type="submit" className={btnPrimary}>
             Save profile
@@ -209,12 +258,20 @@ export default function SettingsPage() {
               <code className="block break-all rounded bg-surface px-2 py-1.5 text-xs text-ok">
                 {createdKey.token}
               </code>
-              <button
-                onClick={() => setCreatedKey(null)}
-                className="mt-2 text-xs text-mut hover:text-fg"
-              >
-                Dismiss
-              </button>
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  onClick={() => void copyKey(createdKey.token)}
+                  className="rounded-lg border border-ok/40 px-2.5 py-1 text-xs font-medium text-ok transition-colors hover:bg-ok/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ok/40"
+                >
+                  {keyCopied ? 'Copied ✓' : 'Copy key'}
+                </button>
+                <button
+                  onClick={() => setCreatedKey(null)}
+                  className="text-xs text-mut hover:text-fg"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 
@@ -229,6 +286,10 @@ export default function SettingsPage() {
               Create key
             </button>
           </form>
+
+          {keys.length === 0 && (
+            <p className="text-xs text-dim">No API keys yet — create one to automate Postivo.</p>
+          )}
 
           {keys.length > 0 && (
             <ul className="divide-y divide-line/60">
@@ -260,7 +321,7 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        <form onSubmit={deleteAccount} className={`${cardCls} space-y-3 border-err/25`}>
+        <form onSubmit={requestDelete} className={`${cardCls} space-y-3 !border-err/30`}>
           <h2 className="font-semibold text-err">Danger zone</h2>
           <p className="text-xs text-dim">
             Permanently delete your account and everything attached to it — posts, channels, scheduled content,
@@ -282,6 +343,17 @@ export default function SettingsPage() {
             {deleting ? 'Deleting…' : 'Delete account'}
           </button>
         </form>
+
+        <ConfirmDialog
+          open={confirmDelete}
+          title="Delete account?"
+          body="This permanently deletes your account and everything attached to it — posts, channels, scheduled content, media, RSS feeds and API keys. This cannot be undone."
+          confirmLabel="Delete account"
+          destructive
+          requireText="DELETE"
+          onConfirm={() => void deleteAccount()}
+          onCancel={() => setConfirmDelete(false)}
+        />
       </div>
     </Portal>
   );

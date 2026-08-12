@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, unauthorized } from '@/lib/auth';
 import { query } from '@/lib/db';
-import { putMedia } from '@/lib/storage';
+import { putMedia, deleteMedia } from '@/lib/storage';
 import { BodyTooLargeError, guardedFetch, readBodyCapped } from '@/lib/ssrf';
 import { rateLimit } from '@/lib/ratelimit';
 import { planOf, storageUsed } from '@/lib/plans';
@@ -71,13 +71,19 @@ export async function POST(req: NextRequest) {
   const ext = EXT_BY_MIME[mime] ?? (mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/g, '');
   const id = `${crypto.randomUUID()}.${ext || 'bin'}`;
   await putMedia(user.id, id, mime, buffer);
-  await query('INSERT INTO media (id, user_id, mime, name, size) VALUES ($1,$2,$3,$4,$5)', [
-    id,
-    user.id,
-    mime,
-    urlName || id,
-    buffer.byteLength,
-  ]);
+  try {
+    await query('INSERT INTO media (id, user_id, mime, name, size) VALUES ($1,$2,$3,$4,$5)', [
+      id,
+      user.id,
+      mime,
+      urlName || id,
+      buffer.byteLength,
+    ]);
+  } catch (err) {
+    // Compensate: an untracked object would sit in storage quota-free forever.
+    await deleteMedia(user.id, id).catch(() => {});
+    throw err;
+  }
 
   return NextResponse.json({ id, url: `/api/media/${id}` }, { status: 201 });
 }

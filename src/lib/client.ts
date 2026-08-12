@@ -25,14 +25,30 @@ export async function api<T>(
   return data;
 }
 
-export function formatDate(iso: string | null | undefined): string {
+export function formatDate(iso: string | null | undefined, tz?: string): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
+  };
+  if (tz) {
+    options.timeZone = tz;
+    options.timeZoneName = 'short';
+  }
+  return new Date(iso).toLocaleString(undefined, options);
+}
+
+export function formatDay(iso: string | null | undefined, tz?: string): string {
+  if (!iso) return '—';
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  };
+  if (tz) options.timeZone = tz;
+  return new Date(iso).toLocaleDateString(undefined, options);
 }
 
 export function toLocalInput(iso: string | null | undefined): string {

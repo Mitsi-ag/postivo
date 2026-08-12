@@ -15,7 +15,9 @@ export async function POST(req: NextRequest) {
     const session = await getStripe().checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: process.env.STRIPE_PRICE_PRO!, quantity: 1 }],
-      customer_email: user.email,
+      // Reuse the stored customer when one exists — otherwise repeat checkouts
+      // mint duplicate customers and only the latest stays manageable.
+      ...(user.stripe_customer_id ? { customer: user.stripe_customer_id } : { customer_email: user.email }),
       metadata: { user_id: user.id },
       success_url: `${appUrl()}/settings/billing?upgraded=1`,
       cancel_url: `${appUrl()}/settings/billing`,

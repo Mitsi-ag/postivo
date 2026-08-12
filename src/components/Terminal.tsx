@@ -27,10 +27,20 @@ const LINES: Line[] = [
   { text: '● 09:00:02  published → linkedin.com/feed/update/7162…', cls: 'text-iris-soft', pause: 2600 },
 ];
 
+// First two lines render instantly — no black-void first paint.
+const SEED = { line: 2, char: 0 };
+
 export default function Terminal() {
-  const [progress, setProgress] = useState<{ line: number; char: number }>({ line: 0, char: 0 });
+  const [progress, setProgress] = useState<{ line: number; char: number }>(SEED);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
   const reduced = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const togglePaused = () => {
+    pausedRef.current = !pausedRef.current;
+    setPaused(pausedRef.current);
+  };
 
   useEffect(() => {
     reduced.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -38,11 +48,15 @@ export default function Terminal() {
       setProgress({ line: LINES.length, char: 0 });
       return;
     }
-    let line = 0;
-    let char = 0;
+    let line = SEED.line;
+    let char = SEED.char;
     let timer: ReturnType<typeof setTimeout>;
 
     const tick = () => {
+      if (pausedRef.current) {
+        timer = setTimeout(tick, 200);
+        return;
+      }
       const current = LINES[line];
       if (char < current.text.length) {
         char += 1;
@@ -54,8 +68,8 @@ export default function Terminal() {
         if (line >= LINES.length) {
           // Hold the full transcript, then restart the loop.
           timer = setTimeout(() => {
-            line = 0;
-            setProgress({ line: 0, char: 0 });
+            line = SEED.line;
+            setProgress({ line: SEED.line, char: 0 });
             timer = setTimeout(tick, 400);
           }, 3200);
         } else {
@@ -64,7 +78,7 @@ export default function Terminal() {
         }
       }
     };
-    timer = setTimeout(tick, 500);
+    timer = setTimeout(tick, 400);
     return () => clearTimeout(timer);
   }, []);
 
@@ -90,8 +104,24 @@ export default function Terminal() {
           <span className="dot pulse-dot" />
           live
         </span>
+        <button
+          type="button"
+          onClick={togglePaused}
+          aria-label={paused ? 'Play terminal animation' : 'Pause terminal animation'}
+          className="ml-2 flex h-5 w-5 items-center justify-center rounded border border-line text-[10px] leading-none text-dim transition-colors hover:border-line2 hover:text-fg"
+        >
+          <span aria-hidden>{paused ? '▶' : '⏸'}</span>
+        </button>
       </div>
-      <div ref={scrollRef} className="h-64 overflow-hidden px-5 py-4 font-mono text-[11.5px] leading-[1.75] sm:text-xs">
+      <p className="sr-only">
+        A terminal showing an API call scheduling a post to X, Bluesky and LinkedIn, then publishing
+        confirmations.
+      </p>
+      <div
+        ref={scrollRef}
+        aria-hidden="true"
+        className="h-64 overflow-hidden px-5 py-4 font-mono text-[11.5px] leading-[1.75] sm:text-xs"
+      >
         {visible.map((l, i) => {
           const isCurrent = !done && i === progress.line;
           const text = isCurrent ? l.text.slice(0, progress.char) : l.text;

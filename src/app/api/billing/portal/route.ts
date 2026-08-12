@@ -11,9 +11,17 @@ export async function POST(req: NextRequest) {
   if (!user.stripe_customer_id) {
     return NextResponse.json({ error: 'No billing account — subscribe first' }, { status: 400 });
   }
-  const session = await getStripe().billingPortal.sessions.create({
-    customer: user.stripe_customer_id,
-    return_url: `${appUrl()}/settings/billing`,
-  });
-  return NextResponse.json({ url: session.url });
+  try {
+    const session = await getStripe().billingPortal.sessions.create({
+      customer: user.stripe_customer_id,
+      return_url: `${appUrl()}/settings/billing`,
+    });
+    return NextResponse.json({ url: session.url });
+  } catch (err) {
+    console.error('[postivo] stripe billing portal failed:', err);
+    return NextResponse.json(
+      { error: 'portal_failed', message: 'Could not open the billing portal — please try again later.' },
+      { status: 502 },
+    );
+  }
 }

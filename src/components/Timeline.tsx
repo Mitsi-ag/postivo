@@ -20,6 +20,9 @@ export default function Timeline({
   points: TimelinePoint[];
   className?: string;
 }) {
+  const hasScheduled = points.some((p) => p.tone !== 'ok');
+  const hasPublished = points.some((p) => p.tone === 'ok');
+
   return (
     <div className={className}>
       {/* Track */}
@@ -37,9 +40,11 @@ export default function Timeline({
         ))}
         {/* Scheduled posts */}
         {points.map((p, i) => (
-          <span
+          <button
             key={i}
-            className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
+            type="button"
+            aria-label={p.label ? `Post scheduled at ${p.label}` : `Post scheduled at ${String(Math.floor(p.t)).padStart(2, '0')}:${String(Math.round((p.t % 1) * 60)).padStart(2, '0')}`}
+            className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50"
             style={{ left: `${Math.min(99.2, Math.max(0.8, (p.t / 24) * 100))}%` }}
           >
             <span
@@ -49,25 +54,42 @@ export default function Timeline({
               }`}
             />
             {p.label && (
-              <span className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 rounded-md border border-line bg-raised px-2 py-1 font-mono text-[10px] whitespace-nowrap text-mut opacity-0 shadow-lg shadow-black/40 transition-opacity group-hover:opacity-100">
+              <span className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 rounded-md border border-line bg-raised px-2 py-1 font-mono text-[10px] whitespace-nowrap text-mut opacity-0 shadow-lg shadow-black/40 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                 {p.label}
               </span>
             )}
-          </span>
+          </button>
         ))}
       </div>
-      {/* Hour scale */}
+      {/* Hour scale — end labels hug the edges so 00:00 / 24:00 never clip */}
       <div className="relative mt-1 h-4 font-mono text-[10px] tracking-wider text-dim" aria-hidden>
         {HOURS.map((h) => (
           <span
             key={h}
-            className="absolute -translate-x-1/2"
+            className={`absolute ${h === 0 ? '' : h === 24 ? '-translate-x-full' : '-translate-x-1/2'}`}
             style={{ left: `${(h / 24) * 100}%` }}
           >
             {String(h).padStart(2, '0')}:00
           </span>
         ))}
       </div>
+      {/* Legend — status is never color-only */}
+      {(hasScheduled || hasPublished) && (
+        <div className="mt-2 flex items-center gap-4 font-mono text-[10px] tracking-wider text-dim">
+          {hasScheduled && (
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-iris" />
+              scheduled
+            </span>
+          )}
+          {hasPublished && (
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ok" />
+              published
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

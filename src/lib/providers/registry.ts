@@ -54,6 +54,26 @@ function firstLine(content: string, fallback = 'Untitled', max = 100): string {
   return (content.split('\n')[0] || fallback).slice(0, max) || fallback;
 }
 
+// Download media bytes back from our own signed URL for native platform upload.
+async function fetchMediaBytes(url: string, maxBytes = 50 * 1024 * 1024): Promise<{ body: Buffer; contentType: string }> {
+  const res = await guardedFetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw await httpError('media fetch', res);
+  const body = await readBodyCapped(res, maxBytes);
+  return { body, contentType: (res.headers.get('content-type') ?? 'application/octet-stream').split(';')[0] };
+}
+
+// Signed media URLs look like /api/media/<uuid>.<ext>?exp=…&sig=… — recover a
+// filename for providers whose upload APIs want one (Discord, Slack, …).
+function mediaFilename(url: string, fallback = 'media'): string {
+  try {
+    const name = new URL(url).pathname.split('/').pop();
+    if (name) return name;
+  } catch {
+    // Unparseable URL — fall through to the fallback.
+  }
+  return fallback;
+}
+
 // YouTube re-downloads our own media for the resumable upload — cap it at the
 // same 50MB the upload route enforces so a huge object can't OOM the instance.
 const YOUTUBE_MAX_BYTES = 50 * 1024 * 1024;
@@ -140,21 +160,48 @@ export const providers: Provider[] = [
     icon: '🦋',
     color: '#0285ff',
     maxLength: 300,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [
       { key: 'handle', label: 'Handle', placeholder: 'you.bsky.social' },
       { key: 'appPassword', label: 'App password', secret: true, placeholder: 'xxxx-xxxx-xxxx-xxxx' },
     ],
-    async publish(channel, creds, content) {
+    async publish(channel, creds, content, mediaUrls) {
       const session = await blueskySession(creds);
+      // Native image upload: pull the bytes back from our signed media URLs
+      // and uploadBlob them (app.bsky.embed.images allows max 4 images).
+      const images: { alt: string; image: unknown }[] = [];
+      for (const url of mediaUrls.slice(0, 4)) {
+        const { body, contentType } = await fetchMediaBytes(url, 10 * 1024 * 1024);
+        if (!contentType.startsWith('image/')) continue; // videos are skipped
+        const up = await guardedFetch('https://bsky.social/xrpc/com.atproto.repo.uploadBlob', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${session.jwt}`, 'content-type': contentType },
+          body: new Uint8Array(body),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!up.ok) throw await httpError('Bluesky image upload', up);
+        const blob = ((await up.json()) as { blob?: unknown }).blob;
+        if (!blob) throw new Error('Bluesky image upload returned no blob');
+        images.push({ alt: '', image: blob });
+      }
+      if (mediaUrls.length && !images.length) {
+        throw new Error('Bluesky supports image attachments only — video upload is not supported');
+      }
+      const record: Record<string, unknown> = {
+        $type: 'app.bsky.feed.post',
+        text: content.slice(0, 300),
+        createdAt: new Date().toISOString(),
+      };
+      if (images.length) record.embed = { $type: 'app.bsky.embed.images', images };
       const res = await guardedFetch('https://bsky.social/xrpc/app.bsky.feed.post', {
         method: 'POST',
         headers: { authorization: `Bearer ${session.jwt}`, 'content-type': 'application/json' },
         body: JSON.stringify({
           repo: session.did,
           collection: 'app.bsky.feed.post',
-          record: { $type: 'app.bsky.feed.post', text: content.slice(0, 300), createdAt: new Date().toISOString() },
+          record,
         }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw await httpError('Bluesky post', res);
       const data = (await res.json()) as { uri?: string };
@@ -215,7 +262,7 @@ export const providers: Provider[] = [
     icon: '🐘',
     color: '#6364ff',
     maxLength: 500,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [
       { key: 'instanceUrl', label: 'Instance URL', placeholder: 'https://mastodon.social' },
       { key: 'accessToken', label: 'Access token', secret: true },
@@ -223,11 +270,29 @@ export const providers: Provider[] = [
     async publish(_channel, creds, content, mediaUrls) {
       if (!creds.instanceUrl || !creds.accessToken) throw new Error('Mastodon instance URL and access token are required');
       const instance = creds.instanceUrl.replace(/\/+$/, '');
-      const status = mediaUrls.length ? `${content}\n\n${mediaUrls.join('\n')}` : content;
+      // Native media upload — a failed upload throws (retryable) rather than
+      // silently degrading the post to pasted URLs.
+      const mediaIds: string[] = [];
+      for (const url of mediaUrls) {
+        const { body, contentType } = await fetchMediaBytes(url);
+        const form = new FormData();
+        form.append('file', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(url));
+        const up = await guardedFetch(`${instance}/api/v2/media`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${creds.accessToken}` },
+          body: form,
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!up.ok) throw await httpError('Mastodon media upload', up);
+        const id = ((await up.json()) as { id?: string }).id;
+        if (!id) throw new Error('Mastodon media upload returned no id');
+        mediaIds.push(id);
+      }
       const res = await guardedFetch(`${instance}/api/v1/statuses`, {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: content, ...(mediaIds.length ? { media_ids: mediaIds } : {}) }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw await httpError('Mastodon post', res);
       const data = (await res.json()) as { url?: string; id?: string };
@@ -307,23 +372,71 @@ export const providers: Provider[] = [
     icon: '𝕏',
     color: '#e7e9ea',
     maxLength: 280,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [
       {
         key: 'bearerToken',
         label: 'OAuth2 user access token',
         secret: true,
-        placeholder: 'Requires tweet.write scope',
+        placeholder: 'Requires tweet.write + media.write scopes',
       },
     ],
-    async publish(_channel, creds, content) {
+    async publish(_channel, creds, content, mediaUrls) {
       if (!creds.bearerToken) {
         throw new Error('X requires an OAuth2 user-context access token with the tweet.write scope');
       }
+      // Native image upload via the chunked INIT → APPEND → FINALIZE flow.
+      const mediaIds: string[] = [];
+      for (const url of mediaUrls.slice(0, 4)) {
+        const { body, contentType } = await fetchMediaBytes(url);
+        if (!contentType.startsWith('image/')) continue; // videos are skipped
+        const init = await guardedFetch('https://api.x.com/2/media/upload?command=INIT&media_category=tweet_image', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${creds.bearerToken}`, 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ media_type: contentType, total_bytes: String(body.byteLength) }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!init.ok) {
+          if (init.status === 403) {
+            const detail = await init.text().catch(() => '');
+            console.error(`[postivo] X media upload INIT: HTTP 403 — ${detail.slice(0, 500)}`);
+            if (/scope/i.test(detail)) {
+              throw new Error('X media upload requires an OAuth2 user token with the media.write scope');
+            }
+            throw new Error('X media upload INIT returned HTTP 403');
+          }
+          throw await httpError('X media upload INIT', init);
+        }
+        const mediaId = ((await init.json()) as { data?: { id?: string } }).data?.id;
+        if (!mediaId) throw new Error('X media upload INIT returned no media id');
+        const form = new FormData();
+        form.append('media', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(url));
+        const append = await guardedFetch(
+          `https://api.x.com/2/media/upload?command=APPEND&media_id=${encodeURIComponent(mediaId)}&segment_index=0`,
+          {
+            method: 'POST',
+            headers: { authorization: `Bearer ${creds.bearerToken}` },
+            body: form,
+            signal: AbortSignal.timeout(60_000),
+          },
+        );
+        if (!append.ok) throw await httpError('X media upload APPEND', append);
+        const fin = await guardedFetch(
+          `https://api.x.com/2/media/upload?command=FINALIZE&media_id=${encodeURIComponent(mediaId)}`,
+          { method: 'POST', headers: { authorization: `Bearer ${creds.bearerToken}` }, signal: AbortSignal.timeout(30_000) },
+        );
+        if (!fin.ok) throw await httpError('X media upload FINALIZE', fin);
+        mediaIds.push(mediaId);
+      }
+      if (mediaUrls.length && !mediaIds.length) throw new Error('X video upload is not supported yet');
       const res = await guardedFetch('https://api.x.com/2/tweets', {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.bearerToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ text: content.slice(0, 280) }),
+        body: JSON.stringify({
+          text: content.slice(0, 280),
+          ...(mediaIds.length ? { media: { media_ids: mediaIds } } : {}),
+        }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw await httpError('X API', res);
       const data = (await res.json()) as { data?: { id?: string } };
@@ -359,31 +472,74 @@ export const providers: Provider[] = [
     icon: '💼',
     color: '#0a66c2',
     maxLength: 3000,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [
       { key: 'accessToken', label: 'OAuth2 access token', secret: true },
       { key: 'personUrn', label: 'Person URN', placeholder: 'urn:li:person:XXXXXXXX' },
     ],
-    async publish(_channel, creds, content) {
+    async publish(_channel, creds, content, mediaUrls) {
       if (!creds.accessToken || !creds.personUrn) throw new Error('LinkedIn access token and person URN are required');
+      const headers = {
+        authorization: `Bearer ${creds.accessToken}`,
+        'content-type': 'application/json',
+        'X-Restli-Protocol-Version': '2.0.0',
+      };
+      // Native image upload (first image only) in the ugcPosts family:
+      // register the asset, PUT the bytes to the signed uploadUrl, then
+      // reference the asset URN in the share's media array.
+      let shareMediaCategory = 'NONE';
+      let media: { status: string; media: string }[] | undefined;
+      if (mediaUrls[0]) {
+        const { body, contentType } = await fetchMediaBytes(mediaUrls[0]);
+        if (!contentType.startsWith('image/')) throw new Error('LinkedIn supports image attachments only');
+        const reg = await guardedFetch('https://api.linkedin.com/v2/assets?action=registerUpload', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            registerUploadRequest: {
+              recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+              owner: creds.personUrn,
+              serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
+            },
+          }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!reg.ok) throw await httpError('LinkedIn image register', reg);
+        const rv = (await reg.json()) as {
+          value?: {
+            asset?: string;
+            uploadMechanism?: { 'com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest'?: { uploadUrl?: string } };
+          };
+        };
+        const asset = rv.value?.asset;
+        const uploadUrl = rv.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;
+        if (!asset || !uploadUrl) throw new Error('LinkedIn image register returned no upload URL');
+        const up = await guardedFetch(uploadUrl, {
+          method: 'PUT',
+          headers: { authorization: `Bearer ${creds.accessToken}`, 'content-type': contentType },
+          body: new Uint8Array(body),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!up.ok) throw await httpError('LinkedIn image upload', up);
+        shareMediaCategory = 'IMAGE';
+        media = [{ status: 'READY', media: asset }];
+      }
       const res = await guardedFetch('https://api.linkedin.com/v2/ugcPosts', {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${creds.accessToken}`,
-          'content-type': 'application/json',
-          'X-Restli-Protocol-Version': '2.0.0',
-        },
+        headers,
         body: JSON.stringify({
           author: creds.personUrn,
           lifecycleState: 'PUBLISHED',
           specificContent: {
             'com.linkedin.ugc.ShareContent': {
               shareCommentary: { text: content },
-              shareMediaCategory: 'NONE',
+              shareMediaCategory,
+              ...(media ? { media } : {}),
             },
           },
           visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
         }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw await httpError('LinkedIn publish', res);
       const id = res.headers.get('x-restli-id') || ((await res.json().catch(() => ({}))) as { id?: string }).id;
@@ -396,17 +552,38 @@ export const providers: Provider[] = [
     icon: '✈️',
     color: '#229ed9',
     maxLength: 4096,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [
       { key: 'botToken', label: 'Bot token', secret: true, placeholder: '123456:ABC-DEF…' },
       { key: 'chatId', label: 'Chat / channel ID', placeholder: '@mychannel or -100…' },
     ],
-    async publish(_channel, creds, content) {
+    async publish(_channel, creds, content, mediaUrls) {
       if (!creds.botToken || !creds.chatId) throw new Error('Telegram bot token and chat ID are required');
+      // Native media: sendPhoto/sendVideo with a multipart upload (first item
+      // only). Media captions are capped at 1024 chars by the Bot API.
+      if (mediaUrls[0]) {
+        const { body, contentType } = await fetchMediaBytes(mediaUrls[0]);
+        const isVideo = contentType.startsWith('video/');
+        const method = isVideo ? 'sendVideo' : 'sendPhoto';
+        const form = new FormData();
+        form.append('chat_id', creds.chatId);
+        form.append('caption', content.slice(0, 1024));
+        form.append(isVideo ? 'video' : 'photo', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(mediaUrls[0]));
+        const res = await guardedFetch(`https://api.telegram.org/bot${creds.botToken}/${method}`, {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) throw await httpError(`Telegram ${method}`, res);
+        const data = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string };
+        if (!data.ok) throw bodyError(`Telegram ${method}`, data.description ?? 'unknown');
+        return { externalId: data.result?.message_id ? String(data.result.message_id) : undefined };
+      }
       const res = await guardedFetch(`https://api.telegram.org/bot${creds.botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chat_id: creds.chatId, text: content.slice(0, 4096) }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw await httpError('Telegram sendMessage', res);
       const data = (await res.json()) as { ok?: boolean; result?: { message_id?: number }; description?: string };
@@ -437,16 +614,27 @@ export const providers: Provider[] = [
     icon: '🎮',
     color: '#5865f2',
     maxLength: 2000,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [{ key: 'webhookUrl', label: 'Webhook URL', secret: true, placeholder: 'https://discord.com/api/webhooks/…' }],
-    async publish(_channel, creds, content) {
+    async publish(_channel, creds, content, mediaUrls) {
       if (!creds.webhookUrl) throw new Error('Discord webhook URL is missing');
       const url = creds.webhookUrl + (creds.webhookUrl.includes('?') ? '&' : '?') + 'wait=true';
-      const res = await guardedFetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content: content.slice(0, 2000) }),
-      });
+      let res: Response;
+      if (mediaUrls[0]) {
+        // Native attachment: multipart with payload_json + one file.
+        const { body, contentType } = await fetchMediaBytes(mediaUrls[0]);
+        const form = new FormData();
+        form.append('payload_json', JSON.stringify({ content: content.slice(0, 2000) }));
+        form.append('file', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(mediaUrls[0]));
+        res = await guardedFetch(url, { method: 'POST', body: form, signal: AbortSignal.timeout(60_000) });
+      } else {
+        res = await guardedFetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ content: content.slice(0, 2000) }),
+          signal: AbortSignal.timeout(30_000),
+        });
+      }
       if (!res.ok) throw await httpError('Discord webhook', res);
       const data = (await res.json().catch(() => ({}))) as { id?: string; channel_id?: string };
       return {
@@ -462,16 +650,73 @@ export const providers: Provider[] = [
     icon: '💬',
     color: '#4a154b',
     maxLength: 4000,
-    supportsMedia: false,
+    supportsMedia: true,
     fields: [
       { key: 'webhookUrl', label: 'Incoming webhook URL', secret: true, placeholder: 'https://hooks.slack.com/services/…' },
+      { key: 'botToken', label: 'Bot token (for media uploads)', secret: true, optional: true, placeholder: 'xoxb-…' },
+      { key: 'channelId', label: 'Channel ID (for media uploads)', optional: true, placeholder: 'C0123456789' },
     ],
-    async publish(_channel, creds, content) {
+    async publish(_channel, creds, content, mediaUrls) {
+      // Native media upload needs the Web API (files.*External) — incoming
+      // webhooks can't attach files. With bot creds, text-only posts go
+      // through chat.postMessage too.
+      if (mediaUrls[0] || (creds.botToken && creds.channelId)) {
+        if (!creds.botToken || !creds.channelId) {
+          throw new Error('Slack media upload requires a bot token and channel ID (incoming webhooks cannot attach files)');
+        }
+        const auth = { authorization: `Bearer ${creds.botToken}` };
+        if (mediaUrls[0]) {
+          const { body, contentType } = await fetchMediaBytes(mediaUrls[0]);
+          const filename = mediaFilename(mediaUrls[0]);
+          const get = await guardedFetch('https://slack.com/api/files.getUploadURLExternal', {
+            method: 'POST',
+            headers: { ...auth, 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ filename, length: String(body.byteLength) }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!get.ok) throw await httpError('Slack getUploadURLExternal', get);
+          const g = (await get.json()) as { ok?: boolean; upload_url?: string; file_id?: string; error?: string };
+          if (!g.ok) throw bodyError('Slack getUploadURLExternal', g.error ?? 'unknown');
+          if (!g.upload_url || !g.file_id) throw new Error('Slack getUploadURLExternal returned no upload URL');
+          const up = await guardedFetch(g.upload_url, {
+            method: 'POST',
+            headers: { 'content-type': contentType },
+            body: new Uint8Array(body),
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (!up.ok) throw await httpError('Slack file upload', up);
+          const done = await guardedFetch('https://slack.com/api/files.completeUploadExternal', {
+            method: 'POST',
+            headers: { ...auth, 'content-type': 'application/json' },
+            body: JSON.stringify({
+              files: [{ id: g.file_id, title: filename }],
+              channel_id: creds.channelId,
+              initial_comment: content,
+            }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!done.ok) throw await httpError('Slack completeUploadExternal', done);
+          const d = (await done.json()) as { ok?: boolean; error?: string };
+          if (!d.ok) throw bodyError('Slack completeUploadExternal', d.error ?? 'unknown');
+          return {};
+        }
+        const res = await guardedFetch('https://slack.com/api/chat.postMessage', {
+          method: 'POST',
+          headers: { ...auth, 'content-type': 'application/json' },
+          body: JSON.stringify({ channel: creds.channelId, text: content }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!res.ok) throw await httpError('Slack chat.postMessage', res);
+        const data = (await res.json()) as { ok?: boolean; error?: string };
+        if (!data.ok) throw bodyError('Slack chat.postMessage', data.error ?? 'unknown');
+        return {};
+      }
       if (!creds.webhookUrl) throw new Error('Slack webhook URL is missing');
       const res = await guardedFetch(creds.webhookUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: content }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw await httpError('Slack webhook', res);
       const body = (await res.text().catch(() => '')).trim();
@@ -776,7 +1021,32 @@ export const providers: Provider[] = [
       if (data.error?.code && data.error.code !== 'ok') {
         throw bodyError('TikTok video init', data.error.message ?? data.error.code);
       }
-      return { externalId: data.data?.publish_id };
+      const publishId = data.data?.publish_id;
+      if (!publishId) return {};
+      // publish_id only means the job was ACCEPTED — poll the status endpoint
+      // until TikTok actually publishes (or fails) the video.
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 3_000));
+        const st = await guardedFetch('https://open.tiktokapis.com/v2/post/publish/status/fetch/', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${creds.access_token}`, 'content-type': 'application/json; charset=UTF-8' },
+          body: JSON.stringify({ publish_id: publishId }),
+        });
+        if (!st.ok) throw await httpError('TikTok publish status', st);
+        const sd = (await st.json()) as {
+          data?: { status?: string; fail_reason?: string };
+          error?: { code?: string; message?: string };
+        };
+        if (sd.error?.code && sd.error.code !== 'ok') {
+          throw bodyError('TikTok publish status', sd.error.message ?? sd.error.code);
+        }
+        const status = sd.data?.status ?? '';
+        if (status === 'PUBLISH_COMPLETE') break;
+        if (status === 'FAILED') throw bodyError('TikTok publish', sd.data?.fail_reason ?? 'processing failed');
+        if (Date.now() > deadline) throw new Error('TikTok is still processing the video — check your TikTok app before retrying');
+      }
+      return { externalId: publishId };
     },
   },
   {

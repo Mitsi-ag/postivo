@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import Portal from '@/components/Portal';
 import Timeline from '@/components/Timeline';
-import { Badge, cardCls, EmptyState, ErrorBanner, Skeleton, SkeletonCards } from '@/components/ui';
+import { Badge, btnGhost, cardCls, EmptyState, ErrorBanner, Skeleton, SkeletonCards } from '@/components/ui';
 import {
   AlertIcon,
   ArrowRightIcon,
@@ -21,7 +21,7 @@ import {
   RssIcon,
 } from '@/components/icons';
 import { api, formatDate } from '@/lib/client';
-import type { AnalyticsDTO, PostDTO } from '@/lib/types';
+import type { AnalyticsDTO, PostDTO, PublicUser } from '@/lib/types';
 
 function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -51,7 +51,9 @@ function Sparkline({ values, className }: { values: number[]; className?: string
   if (values.length < 2) return null;
   const w = 96;
   const h = 26;
-  const max = Math.max(1, ...values);
+  const max = Math.max(...values);
+  // Sparse/zero series would rocket into the corner with preserveAspectRatio="none" — draw nothing.
+  if (max <= 0) return null;
   const pts = values
     .map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 2 - (v / max) * (h - 5)).toFixed(1)}`)
     .join(' ');
@@ -75,6 +77,7 @@ export default function DashboardPage() {
   const [scheduled, setScheduled] = useState<PostDTO[] | null>(null);
   const [published, setPublished] = useState<PostDTO[]>([]);
   const [bestSlot, setBestSlot] = useState<string | null>(null);
+  const [tz, setTz] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,6 +92,9 @@ export default function DashboardPage() {
         setPublished(pub.posts);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load dashboard'));
+    api<{ user: PublicUser }>('/api/auth/me')
+      .then((d) => setTz(d.user.timezone))
+      .catch(() => {});
     api<{ slots: string[] }>('/api/best-time')
       .then((d) => setBestSlot(d.slots[0] ?? null))
       .catch(() => {});
@@ -128,6 +134,7 @@ export default function DashboardPage() {
     { label: 'Views', value: engagement?.views, Icon: EyeIcon },
     { label: 'Comments', value: engagement?.comments, Icon: CommentIcon },
   ];
+  const engagementAllZero = analytics !== null && engagementStats.every((s) => (s.value ?? 0) === 0);
 
   const series = analytics?.last14Days.map((d) => d.count) ?? [];
 
@@ -137,27 +144,49 @@ export default function DashboardPage() {
         <ErrorBanner message={error} />
 
         {analytics === null && !error ? (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             {Array.from({ length: 5 }, (_, i) => (
               <Skeleton key={i} className="h-28" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-            {stats.map((s) => (
-              <div key={s.label} className={`${cardCls} lift relative overflow-hidden`}>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{s.label}</span>
-                  <s.Icon size={14} className="text-dim" />
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            {stats.map((s) => {
+              const isFailed = s.label === 'Failed';
+              const failedCount = isFailed ? (analytics?.totals.failed ?? 0) : 0;
+              const cls = `${
+                isFailed && failedCount > 0 ? cardCls.replace('border-line', 'border-err/30') : cardCls
+              } lift relative overflow-hidden`;
+              const body = (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{s.label}</span>
+                    <s.Icon size={14} className="text-dim" />
+                  </div>
+                  <div className="mt-3 font-mono text-[28px] font-medium leading-none tracking-tight text-fg">
+                    {s.value ?? '—'}
+                  </div>
+                  {s.label === 'Published this week' && series.length > 1 && (
+                    <div className="mt-3 h-6 w-full">
+                      <Sparkline values={series} className="h-6 w-full" />
+                    </div>
+                  )}
+                </>
+              );
+              return isFailed ? (
+                <Link
+                  key={s.label}
+                  href="/queue?tab=failed"
+                  className={`${cls} block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris/50`}
+                >
+                  {body}
+                </Link>
+              ) : (
+                <div key={s.label} className={cls}>
+                  {body}
                 </div>
-                <div className="mt-3 font-mono text-[28px] font-medium leading-none tracking-tight text-fg">
-                  {s.value ?? '—'}
-                </div>
-                {s.label === 'Published this week' && series.length > 1 && (
-                  <Sparkline values={series} className="mt-3 h-6 w-full" />
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -171,32 +200,54 @@ export default function DashboardPage() {
               </span>
               <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-dim">24h dial</span>
             </div>
-            <Timeline points={todayPoints} />
+            {todayPoints.length === 0 ? (
+              <p className="font-mono text-[11px] text-dim">
+                Nothing scheduled for today ·{' '}
+                <Link href="/compose" className="text-iris-soft transition-colors hover:text-iris">
+                  Compose →
+                </Link>
+              </p>
+            ) : (
+              <Timeline points={todayPoints} />
+            )}
           </div>
         )}
 
-        {analytics !== null && (
-          <div className={cardCls}>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-display text-sm font-semibold text-fg">Engagement</h2>
-              <Link href="/analytics" className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-iris-soft transition-colors hover:text-iris">
-                Full analytics
-                <ArrowRightIcon size={12} />
-              </Link>
+        {analytics !== null &&
+          (engagementAllZero ? (
+            <EmptyState
+              icon={<HeartIcon size={18} />}
+              title="No engagement data yet"
+              hint="Stats appear after your first post publishes on a channel that reports them."
+              action={
+                <Link href="/channels" className={btnGhost}>
+                  <PlugIcon size={14} />
+                  Connect a channel
+                </Link>
+              }
+            />
+          ) : (
+            <div className={cardCls}>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-display text-sm font-semibold text-fg">Engagement</h2>
+                <Link href="/analytics" className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-iris-soft transition-colors hover:text-iris">
+                  Full analytics
+                  <ArrowRightIcon size={12} />
+                </Link>
+              </div>
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                {engagementStats.map((s) => (
+                  <div key={s.label} className="rounded-lg border border-line bg-raised/40 px-3 py-2.5">
+                    <s.Icon size={13} className="text-dim" />
+                    <div className="mt-1.5 font-mono text-lg font-medium text-fg">{(s.value ?? 0).toLocaleString()}</div>
+                    <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-dim">{s.label}</div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              {engagementStats.map((s) => (
-                <div key={s.label} className="rounded-lg border border-line bg-raised/40 px-3 py-2.5">
-                  <s.Icon size={13} className="text-dim" />
-                  <div className="mt-1.5 font-mono text-lg font-medium text-fg">{(s.value ?? 0).toLocaleString()}</div>
-                  <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-dim">{s.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          ))}
 
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="grid items-start gap-5 lg:grid-cols-3">
           <div className={`${cardCls} lg:col-span-2`}>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display text-sm font-semibold text-fg">Next up</h2>
@@ -211,7 +262,7 @@ export default function DashboardPage() {
               <EmptyState
                 icon={<CalendarIcon size={18} />}
                 title="Nothing scheduled yet"
-                hint={bestSlot ? `NEXT BEST SLOT — ${formatDate(bestSlot)}` : 'COMPOSE YOUR FIRST POST'}
+                hint={bestSlot ? `NEXT BEST SLOT — ${formatDate(bestSlot, tz)}` : 'COMPOSE YOUR FIRST POST'}
                 action={
                   <Link
                     href="/compose"
@@ -224,19 +275,30 @@ export default function DashboardPage() {
               />
             ) : (
               <ul className="divide-y divide-line/60">
-                {upcoming.map((p) => (
-                  <li key={p.id} className="flex items-start justify-between gap-4 py-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm text-fg">{p.content}</p>
-                      <p className="mt-1 font-mono text-[11px] text-dim">
-                        {formatDate(p.scheduled_at)} ·{' '}
-                        {p.targets.map((t) => t.channel_name ?? t.provider).join(', ')}
-                        {p.repeat_every_days ? ` · every ${p.repeat_every_days}d` : ''}
-                      </p>
-                    </div>
-                    <Badge status={p.status} />
-                  </li>
-                ))}
+                {upcoming.map((p) => {
+                  const overdue =
+                    p.status === 'scheduled' &&
+                    p.scheduled_at !== null &&
+                    new Date(p.scheduled_at).getTime() < Date.now();
+                  return (
+                    <li key={p.id} className="flex items-start justify-between gap-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-fg">{p.content}</p>
+                        {overdue && (
+                          <p className="mt-1 font-mono text-[11px] text-warn">
+                            Was due {formatDate(p.scheduled_at, tz)} — check the scheduler
+                          </p>
+                        )}
+                        <p className="mt-1 font-mono text-[11px] text-dim">
+                          {!overdue && `${formatDate(p.scheduled_at, tz)} · `}
+                          {p.targets.map((t) => t.channel_name ?? t.provider).join(', ')}
+                          {p.repeat_every_days ? ` · every ${p.repeat_every_days}d` : ''}
+                        </p>
+                      </div>
+                      <Badge status={overdue ? 'overdue' : p.status} />
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -248,7 +310,7 @@ export default function DashboardPage() {
                   <ClockIcon size={13} />
                   Next best time to post
                 </h2>
-                <p className="mt-2.5 font-mono text-lg font-medium text-fg">{formatDate(bestSlot)}</p>
+                <p className="mt-2.5 font-mono text-lg font-medium text-fg">{formatDate(bestSlot, tz)}</p>
                 <Link
                   href="/compose"
                   className="mt-2 inline-flex items-center gap-1.5 text-xs text-iris-soft transition-colors hover:text-iris"

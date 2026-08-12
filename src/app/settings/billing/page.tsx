@@ -19,7 +19,7 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-raised">
         <div
-          className={`h-full rounded-full ${pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-iris'}`}
+          className={`h-full rounded-full ${pct >= 100 ? 'bg-err' : pct >= 80 ? 'bg-warn' : 'bg-iris'}`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -75,20 +75,22 @@ export default function BillingPage() {
                 )}
               </p>
             </div>
-            {usage?.billingEnabled &&
-              (usage.plan === 'pro' ? (
-                <button onClick={() => act('/api/billing/portal')} disabled={busy} className={btnPrimary}>
-                  {busy ? 'Opening…' : 'Manage subscription'}
-                </button>
-              ) : (
-                <button onClick={() => act('/api/billing/checkout')} disabled={busy} className={btnPrimary}>
-                  {busy ? 'Opening…' : 'Upgrade to Pro'}
-                </button>
-              ))}
+            {usage?.billingEnabled && usage.plan === 'pro' && (
+              <button onClick={() => act('/api/billing/portal')} disabled={busy} className={btnPrimary}>
+                {busy ? 'Opening…' : 'Manage subscription'}
+              </button>
+            )}
           </div>
           {usage && !usage.billingEnabled && usage.plan !== 'pro' && (
             <p className="mt-3 text-xs text-dim">
-              Billing is not configured on this instance (no Stripe keys) — all plans are self-managed.
+              Upgrades aren&apos;t available on this workspace yet — email{' '}
+              <a
+                href="mailto:support@postivo.keenshift.ai"
+                className="text-iris-soft transition-colors hover:text-iris"
+              >
+                support@postivo.keenshift.ai
+              </a>{' '}
+              and we&apos;ll set you up.
             </p>
           )}
         </div>
@@ -100,10 +102,11 @@ export default function BillingPage() {
             <>
               <Meter label="Connected channels" used={usage.channels.used} limit={usage.channels.limit} />
               <Meter
-                label="Scheduled posts this month"
+                label="Posts scheduled this month (resets on the 1st)"
                 used={usage.postsThisMonth.used}
                 limit={usage.postsThisMonth.limit}
               />
+              <Meter label="Media storage (MB)" used={usage.storageMB.used} limit={usage.storageMB.limit} />
               <p className="flex items-center gap-1.5 text-xs text-dim">
                 AI captions: {usage.plan === 'pro' ? <><CheckIcon size={12} className="text-ok" /> included</> : 'Pro feature'}
               </p>
@@ -116,10 +119,18 @@ export default function BillingPage() {
         {/* Plan comparison */}
         <div className={`${cardCls} grid gap-4 sm:grid-cols-2`}>
           <div>
-            <h3 className="font-semibold text-fg">Free</h3>
+            <h3 className="flex items-center gap-2 font-semibold text-fg">
+              Free
+              {usage && usage.plan !== 'pro' && (
+                <span className="rounded-full border border-line bg-raised/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-mut">
+                  Current plan
+                </span>
+              )}
+            </h3>
             <ul className="mt-2 space-y-1 text-sm text-mut">
               <li>3 channels</li>
               <li>30 scheduled posts / month</li>
+              <li>250 MB media storage</li>
               <li>No AI captions</li>
             </ul>
           </div>
@@ -127,12 +138,39 @@ export default function BillingPage() {
             <h3 className="flex items-center gap-2 font-semibold text-fg">
               <BoltIcon size={14} className="text-iris" />
               Pro — $9/mo
+              {usage?.plan === 'pro' && (
+                <span className="rounded-full border border-line bg-raised/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-mut">
+                  Current plan
+                </span>
+              )}
             </h3>
             <ul className="mt-2 space-y-1 text-sm text-mut">
               <li>100 channels</li>
               <li>10,000 scheduled posts / month</li>
+              <li>25 GB media storage</li>
               <li>AI caption generation</li>
             </ul>
+            {/* Pro CTA — always rendered; falls back to email when Stripe isn't configured. */}
+            <div className="mt-4">
+              {usage?.billingEnabled ? (
+                usage.plan === 'pro' ? (
+                  <button onClick={() => act('/api/billing/portal')} disabled={busy} className={btnPrimary}>
+                    {busy ? 'Opening…' : 'Manage subscription'}
+                  </button>
+                ) : (
+                  <button onClick={() => act('/api/billing/checkout')} disabled={busy} className={btnPrimary}>
+                    {busy ? 'Opening…' : 'Upgrade to Pro'}
+                  </button>
+                )
+              ) : (
+                <a
+                  href="mailto:support@postivo.keenshift.ai?subject=Postivo%20Pro%20upgrade"
+                  className={btnPrimary}
+                >
+                  Email us to upgrade
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>

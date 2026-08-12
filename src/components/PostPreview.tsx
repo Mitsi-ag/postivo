@@ -58,11 +58,13 @@ export default function PostPreview({
   channelName,
   content,
   media,
+  when = 'now',
 }: {
   meta: ProviderMeta | null;
   channelName: string;
   content: string;
   media: string[];
+  when?: string;
 }) {
   const provider = meta?.id ?? 'generic';
   const text = content || 'Your post content will appear here…';
@@ -76,7 +78,7 @@ export default function PostPreview({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1 text-sm">
               <span className="truncate font-bold text-white">{channelName}</span>
-              <span className="shrink-0 text-[#71767b]">@{channelName.replace(/\W+/g, '').toLowerCase() || 'you'} · now</span>
+              <span className="shrink-0 text-[#71767b]">· {when}</span>
             </div>
             <p className={`mt-0.5 whitespace-pre-wrap break-words text-sm ${empty ? 'italic text-[#71767b]' : 'text-[#e7e9ea]'}`}>
               {text}
@@ -102,7 +104,7 @@ export default function PostPreview({
           <Avatar name={channelName} dark={false} />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">{channelName}</p>
-            <p className="text-xs text-slate-500">now · Anyone</p>
+            <p className="text-xs text-slate-500">{when} · Anyone</p>
           </div>
         </div>
         <p className={`mt-2 whitespace-pre-wrap break-words text-sm ${empty ? 'italic text-slate-400' : ''}`}>{text}</p>
@@ -125,7 +127,7 @@ export default function PostPreview({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 text-sm">
               <span className="truncate font-semibold">{channelName}</span>
-              <span className="shrink-0 text-slate-500">@bsky.social · now</span>
+              <span className="shrink-0 text-slate-500">· {when}</span>
             </div>
             <p className={`mt-0.5 whitespace-pre-wrap break-words text-sm ${empty ? 'italic text-slate-400' : ''}`}>{text}</p>
             <MediaStrip media={media} dark={false} />
@@ -153,7 +155,7 @@ export default function PostPreview({
               {channelName}
             </p>
             <p className="font-mono text-[11px] text-dim">
-              {meta?.name ?? provider} · now
+              {meta?.name ?? provider} · {when}
             </p>
           </div>
         </div>

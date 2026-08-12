@@ -1,11 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Portal from '@/components/Portal';
-import { ProviderMark } from '@/components/icons';
-import { Badge, btnDanger, btnGhost, btnPrimary, cardCls, ErrorBanner, inputCls, UpgradeBanner } from '@/components/ui';
+import { CheckIcon, ProviderMark } from '@/components/icons';
+import { Badge, btnDanger, btnGhost, btnPrimary, cardCls, ConfirmDialog, ErrorBanner, inputCls, UpgradeBanner } from '@/components/ui';
 import { api, ApiError, formatDate } from '@/lib/client';
 import type { ChannelDTO, ProviderMeta } from '@/lib/types';
+
+// Provider buttons grouped by demand — social first, developer plumbing last.
+// Anything the registry adds later lands in "Blogs & communities".
+const PROVIDER_SECTIONS: { label: string; ids: string[] }[] = [
+  { label: 'Social', ids: ['instagram', 'tiktok', 'youtube', 'x', 'linkedin', 'bluesky', 'mastodon', 'reddit', 'pinterest', 'telegram'] },
+  { label: 'Blogs & communities', ids: ['devto', 'hashnode', 'medium', 'wordpress'] },
+  { label: 'Developer', ids: ['webhook', 'demo'] },
+];
+
+function groupProviders(providers: ProviderMeta[]): { label: string; items: ProviderMeta[] }[] {
+  const byId = new Map(providers.map((p) => [p.id, p]));
+  const seen = new Set<string>();
+  const groups = PROVIDER_SECTIONS.map((s) => ({
+    label: s.label,
+    items: s.ids.filter((id) => {
+      const hit = byId.has(id);
+      if (hit) seen.add(id);
+      return hit;
+    }).map((id) => byId.get(id) as ProviderMeta),
+  }));
+  const rest = providers.filter((p) => !seen.has(p.id));
+  if (rest.length > 0) groups[groups.length - 2].items.push(...rest);
+  return groups.filter((g) => g.items.length > 0);
+}
 
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<ChannelDTO[]>([]);
@@ -17,6 +41,8 @@ export default function ChannelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ChannelDTO | null>(null);
+  const connectFormRef = useRef<HTMLDivElement>(null);
 
   function load() {
     Promise.all([
@@ -31,6 +57,11 @@ export default function ChannelsPage() {
   }
 
   useEffect(load, []);
+
+  // Bring the connect form into view once a provider is picked.
+  useEffect(() => {
+    if (addingProvider) connectFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [addingProvider]);
 
   function startAdd(p: ProviderMeta) {
     setAddingProvider(p);
@@ -91,7 +122,6 @@ export default function ChannelsPage() {
   }
 
   async function remove(id: string) {
-    if (!window.confirm('Delete this channel? Pending posts for it will be dropped.')) return;
     try {
       await api(`/api/channels/${id}`, { method: 'DELETE' });
       load();
@@ -133,7 +163,7 @@ export default function ChannelsPage() {
                     <button onClick={() => startEdit(c)} className={btnGhost}>
                       Edit
                     </button>
-                    <button onClick={() => void remove(c.id)} className={btnDanger}>
+                    <button onClick={() => setPendingDelete(c)} className={btnDanger}>
                       Delete
                     </button>
                   </div>
@@ -175,6 +205,7 @@ export default function ChannelsPage() {
                     placeholder={f.placeholder}
                     autoComplete="off"
                   />
+                  {f.secret && f.placeholder && <p className="mt-1 text-xs text-dim">{f.placeholder}</p>}
                 </div>
               ))}
               <div className="flex gap-3 pt-1">
@@ -191,24 +222,34 @@ export default function ChannelsPage() {
 
         <div className={cardCls}>
           <h2 className="mb-4 font-semibold text-fg">Add a channel</h2>
-          <div className="flex flex-wrap gap-2">
-            {providers.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => startAdd(p)}
-                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
-                  addingProvider?.id === p.id
-                    ? 'border-iris bg-iris/10 text-iris-soft'
-                    : 'border-line text-mut hover:border-line2 hover:text-fg'
-                }`}
-              >
-                <ProviderMark id={p.id} name={p.name} color={p.color} size={18} />
-                {p.name}
-              </button>
+          <div className="space-y-4">
+            {groupProviders(providers).map((section) => (
+              <div key={section.label}>
+                <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{section.label}</p>
+                <div className="flex flex-wrap gap-2">
+                  {section.items.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => startAdd(p)}
+                      aria-pressed={addingProvider?.id === p.id}
+                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                        addingProvider?.id === p.id
+                          ? 'border-iris bg-iris/10 text-iris-soft'
+                          : 'border-line text-mut hover:border-line2 hover:text-fg'
+                      }`}
+                    >
+                      {addingProvider?.id === p.id && <CheckIcon size={11} />}
+                      <ProviderMark id={p.id} name={p.name} color={p.color} size={18} />
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 
           {addingProvider && (
+            <div ref={connectFormRef} className="scroll-mt-6">
             <form onSubmit={submit} className="mt-5 space-y-3 border-t border-line pt-5">
               <p className="text-sm text-mut">
                 Connect <span className="font-medium text-fg">{addingProvider.name}</span>
@@ -238,6 +279,7 @@ export default function ChannelsPage() {
                     placeholder={f.placeholder}
                     required={!f.optional}
                   />
+                  {f.secret && f.placeholder && <p className="mt-1 text-xs text-dim">{f.placeholder}</p>}
                 </div>
               ))}
               <div className="flex gap-3 pt-1">
@@ -249,9 +291,28 @@ export default function ChannelsPage() {
                 </button>
               </div>
             </form>
+            </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete channel?"
+        body={
+          pendingDelete
+            ? `Delete "${pendingDelete.name}"? Pending posts for it will be dropped.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          const c = pendingDelete;
+          setPendingDelete(null);
+          if (c) void remove(c.id);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </Portal>
   );
 }
