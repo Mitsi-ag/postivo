@@ -314,6 +314,9 @@ const ABBR: Record<string, string> = {
   instagram: 'IG',
   tiktok: 'TT',
   youtube: 'YT',
+  pixelfed: 'PX',
+  friendica: 'FR',
+  peertube: 'PT',
 };
 
 export function ProviderMark({

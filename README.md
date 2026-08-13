@@ -137,6 +137,9 @@ Point a Stripe webhook at `https://<app>/api/billing/webhook` for those two even
 | 📸 Instagram | long-lived access token, Instagram Business account ID | Graph API (Business/Creator accounts via Facebook Login). Requires an image or video; `.mp4`/`.mov` publish as Reels. |
 | 🎵 TikTok | OAuth2 access token | Content Posting API (`video.upload` scope). Video only — TikTok pulls it from the signed media URL. |
 | ▶️ YouTube | OAuth2 access token | Needs the `youtube.upload` scope. Video only (resumable upload); publishes as public. |
+| 🖼️ Pixelfed | instance, access token | Mastodon-compatible API (Settings → Applications). Requires an image or video; native upload via `/api/v2/media` (falls back to `/api/v1/media`). |
+| 🤝 Friendica | instance, access token | Mastodon-compatible API. Text posts, native media upload via `/api/v2/media`. |
+| 📺 PeerTube | instance, username, password | PeerTube's own API (not Mastodon-compatible): OAuth password grant, then multipart upload to your first video channel. Video only; publishes as public. |
 
 Unknown providers or missing credentials fail safely: the scheduler marks the target failed with a
 descriptive error, visible (and retryable) in the Queue.
@@ -186,6 +189,20 @@ curl -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
 
 curl -H "Authorization: Bearer $KEY" 'localhost:3000/api/v1/posts?status=scheduled'
 ```
+
+### MCP server
+
+Postivo is also an [MCP](https://modelcontextprotocol.io) server (streamable-HTTP transport) —
+point any MCP client at it and an agent can schedule, edit and publish with zero SDK work:
+
+```
+URL:  https://your-instance/api/mcp
+Auth: Authorization: Bearer pv_xxxxxxxx...
+```
+
+Tools: `list_channels`, `list_providers`, `list_posts`, `get_post`, `create_post`, `update_post`,
+`delete_post`, `retry_target`, `get_usage`, `get_best_time`. They run through the same core as the
+REST API, so plan limits and validation are identical.
 
 ## Environment variables
 

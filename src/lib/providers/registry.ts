@@ -78,6 +78,25 @@ function mediaFilename(url: string, fallback = 'media'): string {
 // same 50MB the upload route enforces so a huge object can't OOM the instance.
 const YOUTUBE_MAX_BYTES = 50 * 1024 * 1024;
 
+// Fediverse-style instance hosts (Mastodon, Pixelfed, Friendica, PeerTube):
+// accept "pixelfed.social" or "https://pixelfed.social/" and normalize to a
+// bare base URL with no trailing slash. Plain http is rejected in production —
+// instance tokens must never cross the wire unencrypted.
+function normalizeInstance(raw: string, label: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (!trimmed) throw new Error(`${label} instance is required`);
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+  } catch {
+    throw new Error(`${label} instance is not a valid host`);
+  }
+  if (url.protocol !== 'https:' && (url.protocol !== 'http:' || process.env.NODE_ENV === 'production')) {
+    throw new Error(`${label} instance must use https`);
+  }
+  return url.origin + url.pathname.replace(/\/+$/, '');
+}
+
 // ---------- Bluesky helpers ----------
 
 async function blueskySession(creds: Record<string, string>): Promise<{ jwt: string; did: string; handle: string }> {
@@ -269,7 +288,7 @@ export const providers: Provider[] = [
     ],
     async publish(_channel, creds, content, mediaUrls) {
       if (!creds.instanceUrl || !creds.accessToken) throw new Error('Mastodon instance URL and access token are required');
-      const instance = creds.instanceUrl.replace(/\/+$/, '');
+      const instance = normalizeInstance(creds.instanceUrl, 'Mastodon');
       // Native media upload — a failed upload throws (retryable) rather than
       // silently degrading the post to pasted URLs.
       const mediaIds: string[] = [];
@@ -301,7 +320,7 @@ export const providers: Provider[] = [
     async reply(channel, externalId, content) {
       const creds = channel.credentials ?? {};
       if (!creds.instanceUrl || !creds.accessToken) throw new Error('Mastodon instance URL and access token are required');
-      const instance = creds.instanceUrl.replace(/\/+$/, '');
+      const instance = normalizeInstance(creds.instanceUrl, 'Mastodon');
       const res = await guardedFetch(`${instance}/api/v1/statuses`, {
         method: 'POST',
         headers: { authorization: `Bearer ${creds.accessToken}`, 'content-type': 'application/json' },
@@ -314,7 +333,7 @@ export const providers: Provider[] = [
     async stats(channel, externalId) {
       const creds = channel.credentials ?? {};
       if (!creds.instanceUrl || !creds.accessToken) return null;
-      const instance = creds.instanceUrl.replace(/\/+$/, '');
+      const instance = normalizeInstance(creds.instanceUrl, 'Mastodon');
       const res = await guardedFetch(`${instance}/api/v1/statuses/${encodeURIComponent(externalId)}`, {
         headers: { authorization: `Bearer ${creds.accessToken}` },
       });
@@ -324,6 +343,181 @@ export const providers: Provider[] = [
         likes: s.favourites_count ?? 0,
         reposts: s.reblogs_count ?? 0,
         replies: s.replies_count ?? 0,
+      };
+    },
+  },
+  {
+    id: 'pixelfed',
+    name: 'Pixelfed',
+    icon: '🖼️',
+    color: '#d62976',
+    maxLength: 1000,
+    supportsMedia: true,
+    fields: [
+      { key: 'instance', label: 'Instance', placeholder: 'pixelfed.social' },
+      { key: 'access_token', label: 'Access token', secret: true, placeholder: 'Settings → Applications' },
+    ],
+    async publish(_channel, creds, content, mediaUrls) {
+      if (!creds.instance || !creds.access_token) throw new Error('Pixelfed instance and access token are required');
+      // Pixelfed is photo-first — there is no text-only post.
+      if (!mediaUrls.length) throw new Error('Pixelfed requires an image or video');
+      const instance = normalizeInstance(creds.instance, 'Pixelfed');
+      // Mastodon-compatible media upload; older Pixelfed versions only expose
+      // /api/v1/media, so fall back to it when v2 answers 404.
+      const mediaIds: string[] = [];
+      for (const url of mediaUrls) {
+        const { body, contentType } = await fetchMediaBytes(url);
+        const form = () => {
+          const f = new FormData();
+          f.append('file', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(url));
+          return f;
+        };
+        let up = await guardedFetch(`${instance}/api/v2/media`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${creds.access_token}` },
+          body: form(),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (up.status === 404) {
+          await up.body?.cancel().catch(() => {}); // release the socket before the retry
+          up = await guardedFetch(`${instance}/api/v1/media`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${creds.access_token}` },
+            body: form(),
+            signal: AbortSignal.timeout(60_000),
+          });
+        }
+        if (!up.ok) throw await httpError('Pixelfed media upload', up);
+        const id = ((await up.json()) as { id?: string }).id;
+        if (!id) throw new Error('Pixelfed media upload returned no id');
+        mediaIds.push(id);
+      }
+      const res = await guardedFetch(`${instance}/api/v1/statuses`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${creds.access_token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ status: content, media_ids: mediaIds }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) throw await httpError('Pixelfed post', res);
+      const data = (await res.json()) as { url?: string; id?: string };
+      return { externalUrl: data.url, externalId: data.id };
+    },
+  },
+  {
+    id: 'friendica',
+    name: 'Friendica',
+    icon: '🤝',
+    color: '#1e87c9',
+    maxLength: 5000,
+    supportsMedia: true,
+    fields: [
+      { key: 'instance', label: 'Instance', placeholder: 'friendica.example.com' },
+      { key: 'access_token', label: 'Access token', secret: true, placeholder: 'Settings → OAuth apps' },
+    ],
+    async publish(_channel, creds, content, mediaUrls) {
+      if (!creds.instance || !creds.access_token) throw new Error('Friendica instance and access token are required');
+      const instance = normalizeInstance(creds.instance, 'Friendica');
+      // Mastodon-compatible API: media first (v2 endpoint), then the status.
+      const mediaIds: string[] = [];
+      for (const url of mediaUrls) {
+        const { body, contentType } = await fetchMediaBytes(url);
+        const form = new FormData();
+        form.append('file', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(url));
+        const up = await guardedFetch(`${instance}/api/v2/media`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${creds.access_token}` },
+          body: form,
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!up.ok) throw await httpError('Friendica media upload', up);
+        const id = ((await up.json()) as { id?: string }).id;
+        if (!id) throw new Error('Friendica media upload returned no id');
+        mediaIds.push(id);
+      }
+      const res = await guardedFetch(`${instance}/api/v1/statuses`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${creds.access_token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ status: content, ...(mediaIds.length ? { media_ids: mediaIds } : {}) }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) throw await httpError('Friendica post', res);
+      const data = (await res.json()) as { url?: string; id?: string };
+      return { externalUrl: data.url, externalId: data.id };
+    },
+  },
+  {
+    id: 'peertube',
+    name: 'PeerTube',
+    icon: '📺',
+    color: '#f1680d',
+    maxLength: 5000,
+    supportsMedia: true,
+    fields: [
+      { key: 'instance', label: 'Instance', placeholder: 'peertube.example.com' },
+      { key: 'username', label: 'Username' },
+      { key: 'password', label: 'Password', secret: true },
+    ],
+    async publish(_channel, creds, content, mediaUrls) {
+      if (!creds.instance || !creds.username || !creds.password) {
+        throw new Error('PeerTube instance, username and password are required');
+      }
+      const video = mediaUrls[0];
+      // PeerTube is a video platform — there is no text/image post.
+      if (!video) throw new Error('PeerTube requires a video');
+      const instance = normalizeInstance(creds.instance, 'PeerTube');
+      // PeerTube's API is NOT Mastodon-compatible: OAuth password grant against
+      // the instance's built-in client, then a multipart video upload.
+      const oc = await guardedFetch(`${instance}/api/v1/oauth-clients/local`, {
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!oc.ok) throw await httpError('PeerTube OAuth client', oc);
+      const client = (await oc.json()) as { client_id?: string; client_secret?: string };
+      if (!client.client_id || !client.client_secret) throw new Error('PeerTube OAuth client returned no credentials');
+      const token = await guardedFetch(`${instance}/api/v1/users/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: client.client_id,
+          client_secret: client.client_secret,
+          grant_type: 'password',
+          response_type: 'code',
+          username: creds.username,
+          password: creds.password,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!token.ok) throw await httpError('PeerTube login', token);
+      const accessToken = ((await token.json()) as { access_token?: string }).access_token;
+      if (!accessToken) throw new Error('PeerTube login returned no access token');
+      const auth = { authorization: `Bearer ${accessToken}` };
+      // Uploads go to a video channel — take the account's first one.
+      const me = await guardedFetch(`${instance}/api/v1/users/me`, {
+        headers: auth,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!me.ok) throw await httpError('PeerTube account', me);
+      const channelId = ((await me.json()) as { videoChannels?: { id?: number }[] }).videoChannels?.[0]?.id;
+      if (!channelId) throw new Error('PeerTube account has no video channel');
+      const { body, contentType } = await fetchMediaBytes(video);
+      if (!contentType.startsWith('video/')) throw new Error('PeerTube requires a video');
+      const form = new FormData();
+      form.append('name', firstLine(content, 'Postivo video', 120));
+      form.append('description', content.slice(0, 5000));
+      form.append('privacy', '1'); // 1 = public
+      form.append('channelId', String(channelId));
+      form.append('videofile', new Blob([new Uint8Array(body)], { type: contentType }), mediaFilename(video, 'video.mp4'));
+      const res = await guardedFetch(`${instance}/api/v1/videos/upload`, {
+        method: 'POST',
+        headers: auth,
+        body: form,
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) throw await httpError('PeerTube video upload', res);
+      const data = (await res.json()) as { video?: { uuid?: string; shortUUID?: string } };
+      const vid = data.video?.shortUUID ?? data.video?.uuid;
+      return {
+        externalId: data.video?.uuid,
+        externalUrl: vid ? `${instance}/w/${vid}` : undefined,
       };
     },
   },

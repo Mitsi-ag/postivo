@@ -7,7 +7,7 @@ import Timeline from '@/components/Timeline';
 export const metadata: Metadata = {
   title: 'Postivo — Schedule everywhere. Self-host anywhere. One binary.',
   description:
-    'A radically simpler social media scheduler: 16 platforms, threads, recurring posts, RSS automation, analytics and an agent-first API — in one stateless Next.js app.',
+    'A radically simpler social media scheduler: 19 platforms, threads, recurring posts, RSS automation, analytics and an agent-first API — in one stateless Next.js app.',
 };
 
 const COMPARISON = [
@@ -21,6 +21,7 @@ const COMPARISON = [
 const PROVIDERS = [
   'Instagram', 'TikTok', 'YouTube', 'X', 'LinkedIn', 'Bluesky', 'Mastodon', 'Telegram',
   'Discord', 'Slack', 'Reddit', 'Pinterest', 'Hashnode', 'Medium', 'WordPress', 'DEV.to',
+  'Pixelfed', 'Friendica', 'PeerTube',
 ];
 
 const NAV_LINKS: [string, string][] = [
@@ -39,7 +40,7 @@ const FAQ = [
   },
   {
     q: 'Which platforms can I publish to?',
-    a: 'Instagram, TikTok, YouTube, X, LinkedIn, Bluesky, Mastodon, Telegram, Discord, Slack, Reddit, Pinterest, Hashnode, Medium, WordPress and DEV.to — sixteen platforms, one composer — plus arbitrary webhooks (n8n/Zapier/Make) and a sandbox channel for testing.',
+    a: 'Instagram, TikTok, YouTube, X, LinkedIn, Bluesky, Mastodon, Telegram, Discord, Slack, Reddit, Pinterest, Hashnode, Medium, WordPress, DEV.to, Pixelfed, Friendica and PeerTube — nineteen platforms, one composer — plus arbitrary webhooks (n8n/Zapier/Make) and a sandbox channel for testing.',
   },
   {
     q: 'What does the agent-first API look like?',
@@ -225,12 +226,12 @@ export default function Landing() {
           sub="Without the six-container docker-compose file."
         />
         <div className="mt-14 grid gap-4 lg:grid-cols-12">
-          {/* Large: 16 platforms */}
+          {/* Large: 19 platforms */}
           <div className="edge-top lift rounded-card border border-line bg-surface p-7 lg:col-span-7">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-iris/25 bg-iris/10 text-iris-soft">
               <PlugIcon size={17} />
             </div>
-            <h3 className="mt-5 font-display text-lg font-semibold text-fg">16 platforms, one composer</h3>
+            <h3 className="mt-5 font-display text-lg font-semibold text-fg">19 platforms, one composer</h3>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-mut">
               Compose once, publish everywhere — with per-channel overrides and live per-platform
               previews that show exactly what ships. Webhooks cover anything else.
@@ -242,7 +243,7 @@ export default function Landing() {
                 </span>
               ))}
               <span className="rounded-md border border-line bg-raised/50 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-dim">
-                + 10 more
+                + 13 more
               </span>
             </div>
           </div>
@@ -251,10 +252,10 @@ export default function Landing() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-iris/25 bg-iris/10 text-iris-soft">
               <BoltIcon size={17} />
             </div>
-            <h3 className="mt-5 font-display text-lg font-semibold text-fg">Agent-first API</h3>
+            <h3 className="mt-5 font-display text-lg font-semibold text-fg">Agent-first API + MCP</h3>
             <p className="mt-2 text-sm leading-relaxed text-mut">
-              Every action is a clean REST endpoint with Bearer keys and an OpenAPI 3.1 spec. Hand
-              the spec to an agent — it schedules for you.
+              Every action is a clean REST endpoint with Bearer keys and an OpenAPI 3.1 spec — plus a
+              built-in MCP server, so any agent can schedule for you out of the box.
             </p>
             <pre className="mt-5 overflow-x-auto rounded-lg border border-line bg-[#05060a] p-3.5 font-mono text-[10.5px] leading-relaxed text-mut">
 {`POST /api/v1/posts

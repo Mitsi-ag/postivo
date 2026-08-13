@@ -10,7 +10,7 @@ import type { ChannelDTO, ProviderMeta } from '@/lib/types';
 // Provider buttons grouped by demand — social first, developer plumbing last.
 // Anything the registry adds later lands in "Blogs & communities".
 const PROVIDER_SECTIONS: { label: string; ids: string[] }[] = [
-  { label: 'Social', ids: ['instagram', 'tiktok', 'youtube', 'x', 'linkedin', 'bluesky', 'mastodon', 'reddit', 'pinterest', 'telegram'] },
+  { label: 'Social', ids: ['instagram', 'tiktok', 'youtube', 'x', 'linkedin', 'bluesky', 'mastodon', 'pixelfed', 'friendica', 'peertube', 'reddit', 'pinterest', 'telegram'] },
   { label: 'Blogs & communities', ids: ['devto', 'hashnode', 'medium', 'wordpress'] },
   { label: 'Developer', ids: ['webhook', 'demo'] },
 ];

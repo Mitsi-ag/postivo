@@ -44,6 +44,15 @@ const SLOTS: Record<string, Slot[]> = {
     { days: WEEKDAYS, hours: [14, 15, 16] },
     { days: WEEKEND, hours: [9, 10, 11] },
   ],
+  pixelfed: [
+    { days: WEEKDAYS, hours: [11, 13, 19] },
+    { days: WEEKEND, hours: [10, 11] },
+  ],
+  friendica: [{ days: WEEKDAYS, hours: [8, 12, 18] }],
+  peertube: [
+    { days: WEEKDAYS, hours: [14, 15, 16] },
+    { days: WEEKEND, hours: [9, 10, 11] },
+  ],
 };
 
 export function isValidTimezone(tz: string): boolean {

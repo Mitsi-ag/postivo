@@ -11,10 +11,11 @@ import { signedMediaUrl } from './mediaShare';
 
 const STARTED = Symbol.for('postivo.scheduler.started');
 const MAX_ATTEMPTS = 3;
-const BATCH_SIZE = 10;
+// 25 per tick with 4-way concurrency: worst-case batch ≈ 7.5 min < 10-min lease.
+const BATCH_SIZE = 25;
 // Watchdog: a claimed ('publishing') target becomes claimable again after this
 // long, so a crashed instance can never strand a post.
-const CLAIM_TIMEOUT_MINUTES = 5;
+const CLAIM_TIMEOUT_MINUTES = 10;
 // Hard cap on any single provider publish — a hung provider must not hold a
 // claim hostage until the watchdog re-claims it (duplicate-publish window).
 // 90s: Instagram's two-step container flow polls up to ~60s for Reels.
@@ -120,10 +121,10 @@ async function claimDue(): Promise<DueRow[]> {
   );
 }
 
-// Process claimed targets with bounded concurrency: sequentially, 10 targets
-// × 90s worst case would outlive the 5-minute claim lease and a replica could
-// re-claim the tail — publishing duplicates. 4-way keeps the batch ≤ ~4 min.
-const PUBLISH_CONCURRENCY = 4;
+// Process claimed targets with bounded concurrency: sequentially, a full batch
+// would outlive the claim lease and a replica could re-claim the tail —
+// publishing duplicates. 5-way keeps the batch comfortably under the lease.
+const PUBLISH_CONCURRENCY = 5;
 
 async function mapPool<T>(items: T[], size: number, fn: (item: T) => Promise<void>): Promise<void> {
   let i = 0;
